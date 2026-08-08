@@ -8,6 +8,7 @@ import type { Plugin, ResolvedConfig } from 'vite'
 import type {
   DesignerDocument,
   DesignerDocumentSummary,
+  PreviewCandidateResponse,
   SaveDocumentRequest,
 } from '@vue-designer/shared'
 import { instrumentDesignerNodes, parseDesignerDocument } from '@vue-designer/shared'
@@ -53,10 +54,18 @@ function isSaveRequest(value: unknown): value is SaveDocumentRequest {
   return typeof candidate.source === 'string' && typeof candidate.revision === 'string'
 }
 
+function isCandidateRequest(value: unknown): value is { path: string; source: string } {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return typeof candidate.path === 'string' && typeof candidate.source === 'string'
+}
+
 export default function vueDesigner(options: VueDesignerOptions): Plugin {
   let config: ResolvedConfig
   let documentFiles = new Map<string, string>()
   const previewEntryPrefix = '\0vue-designer:preview-entry?'
+  const candidateMarker = '?vue-designer-candidate='
+  const candidates = new Map<string, { path: string; source: string }>()
 
   async function discoverDocuments(): Promise<DesignerDocumentSummary[]> {
     const patterns = Array.isArray(options.documents)
@@ -90,23 +99,43 @@ export default function vueDesigner(options: VueDesignerOptions): Plugin {
   return {
     name: 'vue-designer',
     enforce: 'pre',
-    resolveId(id) {
+    async resolveId(id) {
       if (id.startsWith('/__designer/preview-entry.js?')) {
         return `${previewEntryPrefix}${id.slice(id.indexOf('?') + 1)}`
       }
+      if (id.startsWith('/__designer/candidate.vue?')) {
+        const candidateId = new URLSearchParams(id.slice(id.indexOf('?') + 1)).get('id') ?? ''
+        const candidate = candidates.get(candidateId)
+        if (!candidate) throw new Error('Preview candidate expired')
+        const absolutePath = await resolveDocument(candidate.path)
+        if (!absolutePath) throw new Error('Preview document not found')
+        return `${absolutePath}${candidateMarker}${candidateId}`
+      }
     },
     async load(id) {
+      if (id.includes(candidateMarker)) {
+        const candidateId = id.slice(id.indexOf(candidateMarker) + candidateMarker.length)
+        const candidate = candidates.get(candidateId)
+        if (!candidate) throw new Error('Preview candidate expired')
+        return candidate.source
+      }
       if (!id.startsWith(previewEntryPrefix)) return
 
       const params = new URLSearchParams(id.slice(previewEntryPrefix.length))
       const relativePath = params.get('path') ?? ''
       const absolutePath = await resolveDocument(relativePath)
       if (!absolutePath) throw new Error('Preview document not found')
+      const candidateId = params.get('candidate')
+      const candidate = candidateId ? candidates.get(candidateId) : undefined
+      if (candidate && candidate.path !== relativePath) throw new Error('Preview candidate does not match document')
 
       const appPath = options.app ? path.resolve(config.root, options.app) : null
+      const documentImport = candidateId && candidate
+        ? `/__designer/candidate.vue?id=${encodeURIComponent(candidateId)}`
+        : absolutePath
       return `
 import { createApp, h } from 'vue'
-import Document from ${JSON.stringify(absolutePath)}
+import Document from ${JSON.stringify(documentImport)}
 ${appPath ? `import setup from ${JSON.stringify(appPath)}` : 'const setup = null'}
 const app = createApp({ render: () => h(Document) })
 if (setup?.setup) await setup.setup(app)
@@ -136,6 +165,7 @@ addEventListener('message', (event) => {
 `
     },
     transform(code, id) {
+      if (id.includes(candidateMarker)) return { code: instrumentDesignerNodes(code), map: null }
       const filePath = path.resolve(id.split('?')[0] ?? id)
       const isDocument = [...documentFiles.values()].some(
         (documentPath) => path.resolve(documentPath) === filePath,
@@ -160,6 +190,26 @@ addEventListener('message', (event) => {
         try {
           if (request.method === 'GET' && url.pathname === '/__designer/api/documents') {
             return json(response, 200, await discoverDocuments())
+          }
+
+          if (request.method === 'POST' && url.pathname === '/__designer/api/candidate') {
+            const body = await readBody(request)
+            if (!isCandidateRequest(body) || !await resolveDocument(body.path)) {
+              return json(response, 400, { error: 'Invalid preview candidate' })
+            }
+            const parsed = parseDesignerDocument(body.source)
+            const parseError = parsed.diagnostics.find((item) => item.severity === 'error')
+            if (parseError) return json(response, 422, { error: parseError.message })
+
+            const candidateId = randomUUID()
+            candidates.set(candidateId, { path: body.path, source: body.source })
+            if (candidates.size > 50) candidates.delete(candidates.keys().next().value!)
+            const result: PreviewCandidateResponse = {
+              candidateId,
+              tree: parsed.tree,
+              diagnostics: parsed.diagnostics,
+            }
+            return json(response, 200, result)
           }
 
           if (url.pathname === '/__designer/api/document') {
@@ -212,6 +262,8 @@ addEventListener('message', (event) => {
             }
 
             const entryParams = new URLSearchParams({ path: relativePath })
+            const candidateId = url.searchParams.get('candidate')
+            if (candidateId) entryParams.set('candidate', candidateId)
             response.statusCode = 200
             response.setHeader('Content-Type', 'text/html; charset=utf-8')
             response.setHeader('Cache-Control', 'no-store')

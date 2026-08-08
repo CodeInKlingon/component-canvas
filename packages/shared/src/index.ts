@@ -25,10 +25,20 @@ export interface DesignerNode {
   id: string
   kind: 'element' | 'component' | 'text'
   label: string
+  value?: string
   range: DesignerSourceRange
   editable: boolean
   lockedReason?: string
+  attributes: DesignerAttribute[]
   children: DesignerNode[]
+}
+
+export interface DesignerAttribute {
+  name: string
+  value: string
+  kind: 'static' | 'literal-binding' | 'expression'
+  editable: boolean
+  range: DesignerSourceRange
 }
 
 export interface DesignerApiError {
@@ -44,6 +54,16 @@ export interface SaveDocumentRequest {
 export interface SaveDocumentResponse {
   revision: string
 }
+
+export interface PreviewCandidateResponse {
+  candidateId: string
+  tree: DesignerNode[]
+  diagnostics: DesignerDiagnostic[]
+}
+
+export type DesignerSourceOperation =
+  | { type: 'set-text'; nodeId: string; value: string }
+  | { type: 'set-attribute'; nodeId: string; name: string; value: string }
 
 export type PreviewToEditorMessage = {
   channel: 'vue-designer'
@@ -65,4 +85,4 @@ export function isPreviewToEditorMessage(value: unknown): value is PreviewToEdit
     && typeof message.nodeId === 'string'
 }
 
-export { instrumentDesignerNodes, parseDesignerDocument } from './parse.ts'
+export { applySourceOperation, instrumentDesignerNodes, parseDesignerDocument } from './parse.ts'

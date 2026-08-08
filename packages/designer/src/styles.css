@@ -33,9 +33,9 @@ button { color: inherit; }
 .save-button:disabled { background: #343a33; color: #757c74; cursor: default; }
 
 .workspace { min-height: 0; display: grid; grid-template-columns: 230px minmax(400px, 1fr) minmax(320px, 30vw); }
-.sidebar, .source-panel { min-height: 0; background: #1b1f1b; }
+.sidebar, .inspector-panel { min-height: 0; background: #1b1f1b; }
 .sidebar { border-right: 1px solid #30352f; }
-.source-panel { border-left: 1px solid #30352f; display: grid; grid-template-rows: 42px 1fr; }
+.inspector-panel { border-left: 1px solid #30352f; display: grid; grid-template-rows: 42px 1fr; }
 .panel-heading { height: 42px; padding: 0 13px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #292e29; color: #949b93; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; }
 .panel-heading button:hover { color: #b7f36b; }
 .language { font: 9px 'DM Mono', monospace; color: #5f685e; }
@@ -65,8 +65,30 @@ button { color: inherit; }
 .preview-frame { max-width: 100%; height: 100%; min-height: 500px; margin: auto; background: white; box-shadow: 0 8px 32px #05080566; transition: width .25s ease; }
 .preview-frame iframe { width: 100%; height: 100%; border: 0; background: white; }
 .preview-empty { display: grid; place-items: center; height: 100%; color: #626a61; font-size: 12px; }
-.source-panel textarea { width: 100%; height: 100%; resize: none; border: 0; outline: 0; padding: 17px; background: #141714; color: #cfd7cc; caret-color: #b7f36b; font: 12px/1.7 'DM Mono', monospace; tab-size: 2; }
-.source-panel textarea::selection { background: #435932; }
+.inspector-tabs { display: flex; border-bottom: 1px solid #292e29; padding: 0 10px; }
+.inspector-tabs button { position: relative; border: 0; background: none; color: #727a71; padding: 0 11px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; cursor: pointer; }
+.inspector-tabs button.active { color: #dce3da; }
+.inspector-tabs button.active::after { content: ''; position: absolute; height: 2px; left: 9px; right: 9px; bottom: -1px; background: #b7f36b; }
+.inspector-content { min-height: 0; overflow: auto; }
+.inspector-empty { display: grid; gap: 7px; padding: 28px 18px; color: #6f776e; font-size: 11px; line-height: 1.5; }
+.inspector-empty strong { color: #9ca39b; font-size: 12px; }
+.inspector-empty.compact { padding: 18px; }
+.selection-summary { display: flex; align-items: center; gap: 9px; padding: 15px; border-bottom: 1px solid #292e29; }
+.selection-summary > div { display: grid; }
+.selection-summary strong { font: 11px 'DM Mono', monospace; }
+.selection-summary small { margin-top: 3px; color: #687067; font-size: 8px; text-transform: uppercase; }
+.inspector-section { display: grid; gap: 11px; padding: 16px; border-bottom: 1px solid #292e29; }
+.inspector-section > label { display: grid; gap: 6px; color: #919990; font-size: 9px; font-weight: 600; }
+.inspector-section label > span { display: flex; justify-content: space-between; }
+.inspector-section label small { color: #806f59; font-size: 7px; text-transform: uppercase; }
+.section-title { color: #747c73; font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.inspector-section input, .inspector-section textarea { width: 100%; border: 1px solid #343a33; border-radius: 6px; outline: 0; background: #141714; color: #d0d7ce; padding: 8px 9px; font: 10px/1.5 'DM Mono', monospace; }
+.inspector-section textarea { min-height: 90px; resize: vertical; }
+.inspector-section input:focus, .inspector-section textarea:focus { border-color: #789d50; box-shadow: 0 0 0 2px #789d5022; }
+.inspector-section input:disabled { color: #716c63; background: #191a17; }
+.locked-notice { margin: 14px; padding: 10px; border: 1px solid #544534; border-radius: 6px; color: #b59a75; font-size: 9px; line-height: 1.5; }
+.source-editor { width: 100%; height: 100%; resize: none; border: 0; outline: 0; padding: 17px; background: #141714; color: #cfd7cc; caret-color: #b7f36b; font: 12px/1.7 'DM Mono', monospace; tab-size: 2; }
+.source-editor::selection { background: #435932; }
 .diagnostic { position: fixed; z-index: 5; left: 246px; right: 18px; bottom: 18px; display: flex; align-items: center; gap: 10px; padding: 11px 13px; border: 1px solid #7f4a44; border-radius: 8px; background: #321f1dcc; backdrop-filter: blur(12px); color: #ffc3bc; font-size: 11px; box-shadow: 0 8px 30px #0008; }
 .diagnostic span { flex: 1; }
 .diagnostic button { border: 1px solid #88564f; border-radius: 5px; background: #4a2d29; padding: 5px 8px; font-size: 10px; cursor: pointer; }

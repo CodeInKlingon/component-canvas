@@ -6,8 +6,10 @@ import type {
   DesignerDocumentSummary,
   SaveDocumentResponse,
   DesignerNode,
+  DesignerSourceOperation,
+  PreviewCandidateResponse,
 } from '@vue-designer/shared'
-import { isPreviewToEditorMessage } from '@vue-designer/shared'
+import { applySourceOperation, isPreviewToEditorMessage, parseDesignerDocument } from '@vue-designer/shared'
 import TreeNode from './TreeNode.vue'
 
 type SaveState = 'clean' | 'dirty' | 'saving' | 'conflict'
@@ -22,6 +24,22 @@ const previewVersion = ref(0)
 const viewportWidth = ref<'100%' | '768px' | '390px'>('100%')
 const previewFrame = ref<HTMLIFrameElement | null>(null)
 const selectedNodeId = ref<string | null>(null)
+const candidateId = ref<string | null>(null)
+const inspectorView = ref<'content' | 'source'>('content')
+let sourcePreviewTimer: number | undefined
+let candidateRequest = 0
+
+function findNode(nodes: DesignerNode[], id: string | null): DesignerNode | null {
+  if (!id) return null
+  for (const node of nodes) {
+    if (node.id === id) return node
+    const child = findNode(node.children, id)
+    if (child) return child
+  }
+  return null
+}
+
+const selectedNode = computed(() => findNode(activeDocument.value?.tree ?? [], selectedNodeId.value))
 
 const previewUrl = computed(() => {
   if (!activeDocument.value) return ''
@@ -29,6 +47,7 @@ const previewUrl = computed(() => {
     path: activeDocument.value.path,
     version: String(previewVersion.value),
   })
+  if (candidateId.value) params.set('candidate', candidateId.value)
   return `/__designer/preview?${params}`
 })
 
@@ -68,6 +87,7 @@ async function openDocument(document: DesignerDocumentSummary): Promise<void> {
     source.value = loaded.source
     saveState.value = 'clean'
     selectedNodeId.value = null
+    candidateId.value = null
     previewVersion.value += 1
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Unable to open document'
@@ -77,6 +97,69 @@ async function openDocument(document: DesignerDocumentSummary): Promise<void> {
 function updateSource(event: Event): void {
   source.value = (event.target as HTMLTextAreaElement).value
   saveState.value = source.value === activeDocument.value?.source ? 'clean' : 'dirty'
+  window.clearTimeout(sourcePreviewTimer)
+  sourcePreviewTimer = window.setTimeout(() => void createCandidate(source.value), 350)
+}
+
+async function createCandidate(candidateSource: string): Promise<void> {
+  const document = activeDocument.value
+  if (!document) return
+  if (candidateSource === document.source) {
+    const parsed = parseDesignerDocument(candidateSource)
+    candidateId.value = null
+    activeDocument.value = { ...document, tree: parsed.tree, diagnostics: parsed.diagnostics }
+    saveState.value = 'clean'
+    error.value = ''
+    return
+  }
+
+  const request = ++candidateRequest
+  try {
+    const result = await api<PreviewCandidateResponse>('/__designer/api/candidate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: document.path, source: candidateSource }),
+    })
+    if (request !== candidateRequest || source.value !== candidateSource) return
+    candidateId.value = result.candidateId
+    activeDocument.value = { ...document, tree: result.tree, diagnostics: result.diagnostics }
+    error.value = ''
+  } catch (cause) {
+    if (request !== candidateRequest) return
+    error.value = cause instanceof Error ? cause.message : 'Unable to preview source'
+  }
+}
+
+async function applyOperation(operation: DesignerSourceOperation): Promise<void> {
+  try {
+    const candidateSource = applySourceOperation(source.value, operation)
+    source.value = candidateSource
+    saveState.value = candidateSource === activeDocument.value?.source ? 'clean' : 'dirty'
+    await createCandidate(candidateSource)
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : 'Unable to edit selection'
+  }
+}
+
+function updateSelectedText(event: Event): void {
+  const node = selectedNode.value
+  if (!node) return
+  void applyOperation({
+    type: 'set-text',
+    nodeId: node.id,
+    value: (event.target as HTMLTextAreaElement).value,
+  })
+}
+
+function updateSelectedAttribute(name: string, event: Event): void {
+  const node = selectedNode.value
+  if (!node) return
+  void applyOperation({
+    type: 'set-attribute',
+    nodeId: node.id,
+    name,
+    value: (event.target as HTMLInputElement).value,
+  })
 }
 
 async function save(): Promise<void> {
@@ -95,6 +178,7 @@ async function save(): Promise<void> {
       },
     )
     activeDocument.value = { ...document, source: source.value, revision: result.revision }
+    candidateId.value = null
     saveState.value = 'clean'
     previewVersion.value += 1
   } catch (cause) {
@@ -127,6 +211,11 @@ function handlePreviewMessage(event: MessageEvent): void {
   selectedNodeId.value = event.data.nodeId
 }
 
+function handlePreviewLoad(): void {
+  const node = selectedNode.value
+  if (node && node.kind !== 'text') selectNode(node)
+}
+
 function handleShortcut(event: KeyboardEvent): void {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
     event.preventDefault()
@@ -143,6 +232,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('keydown', handleShortcut)
   window.removeEventListener('message', handlePreviewMessage)
+  window.clearTimeout(sourcePreviewTimer)
 })
 </script>
 
@@ -209,15 +299,52 @@ onUnmounted(() => {
               :src="previewUrl"
               sandbox="allow-scripts"
               title="Vue document preview"
+              @load="handlePreviewLoad"
             />
             <div v-else class="preview-empty">Select a document to begin.</div>
           </div>
         </div>
       </section>
 
-      <aside class="source-panel">
-        <div class="panel-heading"><span>Source</span><span class="language">Vue SFC</span></div>
+      <aside class="inspector-panel">
+        <div class="inspector-tabs">
+          <button :class="{ active: inspectorView === 'content' }" @click="inspectorView = 'content'">Content</button>
+          <button :class="{ active: inspectorView === 'source' }" @click="inspectorView = 'source'">Source</button>
+        </div>
+
+        <div v-if="inspectorView === 'content'" class="inspector-content">
+          <div v-if="!selectedNode" class="inspector-empty">
+            <strong>Select a layer</strong>
+            <span>Text and attributes for the selected element will appear here.</span>
+          </div>
+          <template v-else>
+            <div class="selection-summary">
+              <span class="tree-kind">{{ selectedNode.kind === 'component' ? 'C' : selectedNode.kind === 'text' ? 'T' : 'E' }}</span>
+              <div><strong>{{ selectedNode.label }}</strong><small>{{ selectedNode.kind }}</small></div>
+            </div>
+            <section v-if="selectedNode.kind === 'text'" class="inspector-section">
+              <label for="selected-text">Text content</label>
+              <textarea id="selected-text" :value="selectedNode.value" @input="updateSelectedText" />
+            </section>
+            <section v-if="selectedNode.attributes.length" class="inspector-section">
+              <div class="section-title">Attributes</div>
+              <label v-for="attribute in selectedNode.attributes" :key="attribute.name">
+                <span>{{ attribute.name }}<small v-if="!attribute.editable">Expression</small></span>
+                <input
+                  :value="attribute.value"
+                  :disabled="!attribute.editable"
+                  @change="updateSelectedAttribute(attribute.name, $event)"
+                />
+              </label>
+            </section>
+            <div v-if="selectedNode.kind !== 'text' && !selectedNode.attributes.length" class="inspector-empty compact">No attributes on this layer.</div>
+            <div v-if="!selectedNode.editable" class="locked-notice">{{ selectedNode.lockedReason }}</div>
+          </template>
+        </div>
+
         <textarea
+          v-else
+          class="source-editor"
           :value="source"
           :disabled="!activeDocument"
           spellcheck="false"

@@ -1,6 +1,6 @@
 import { NodeTypes, parse as parseTemplate, type TemplateChildNode } from '@vue/compiler-dom'
 import { parse as parseSfc } from '@vue/compiler-sfc'
-import type { DesignerDiagnostic, DesignerNode } from './index'
+import type { DesignerAttribute, DesignerDiagnostic, DesignerNode, DesignerSourceOperation } from './index'
 
 export interface ParsedDesignerDocument {
   tree: DesignerNode[]
@@ -28,11 +28,13 @@ function convertChildren(children: TemplateChildNode[], state: ParseState): Desi
         id: `node-${state.nextId++}`,
         kind: 'text',
         label: text.length > 32 ? `${text.slice(0, 29)}...` : text,
+        value: text,
         range: {
           start: state.templateOffset + child.loc.start.offset,
           end: state.templateOffset + child.loc.end.offset,
         },
         editable: true,
+        attributes: [],
         children: [],
       })
       continue
@@ -47,6 +49,32 @@ function convertChildren(children: TemplateChildNode[], state: ParseState): Desi
     const lockedReason = structuralDirective
       ? `Structural directive v-${structuralDirective.name} is not visually editable yet`
       : undefined
+    const attributes: DesignerAttribute[] = child.props.map((prop) => {
+      const range = {
+        start: state.templateOffset + prop.loc.start.offset,
+        end: state.templateOffset + prop.loc.end.offset,
+      }
+      if (prop.type === NodeTypes.ATTRIBUTE) {
+        return {
+          name: prop.name,
+          value: prop.value?.content ?? '',
+          kind: 'static' as const,
+          editable: true,
+          range,
+        }
+      }
+
+      const name = prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION ? prop.arg.content : `v-${prop.name}`
+      const value = prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION ? prop.exp.content : ''
+      const literal = prop.name === 'bind' && /^(?:true|false|null|-?\d+(?:\.\d+)?|'[^']*'|"[^"]*")$/.test(value)
+      return {
+        name,
+        value,
+        kind: literal ? 'literal-binding' as const : 'expression' as const,
+        editable: literal,
+        range,
+      }
+    })
     state.insertions.push({
       offset: state.templateOffset + child.loc.start.offset + 1 + child.tag.length,
       text: ` data-vue-designer-id="${id}"`,
@@ -62,6 +90,7 @@ function convertChildren(children: TemplateChildNode[], state: ParseState): Desi
       },
       editable: !lockedReason,
       lockedReason,
+      attributes,
       children: convertChildren(child.children, state),
     })
   }
@@ -108,4 +137,39 @@ export function instrumentDesignerNodes(source: string): string {
     instrumented = `${instrumented.slice(0, insertion.offset)}${insertion.text}${instrumented.slice(insertion.offset)}`
   }
   return instrumented
+}
+
+function findNode(nodes: DesignerNode[], nodeId: string): DesignerNode | undefined {
+  for (const node of nodes) {
+    if (node.id === nodeId) return node
+    const child = findNode(node.children, nodeId)
+    if (child) return child
+  }
+}
+
+function escapeText(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+}
+
+function escapeAttribute(value: string): string {
+  return escapeText(value).replaceAll('"', '&quot;')
+}
+
+export function applySourceOperation(source: string, operation: DesignerSourceOperation): string {
+  const parsed = parseDesignerDocument(source)
+  if (parsed.diagnostics.some((item) => item.severity === 'error')) throw new Error('Cannot edit an invalid document')
+  const node = findNode(parsed.tree, operation.nodeId)
+  if (!node) throw new Error('Selected node no longer exists')
+
+  if (operation.type === 'set-text') {
+    if (node.kind !== 'text') throw new Error('The selected node is not text')
+    return `${source.slice(0, node.range.start)}${escapeText(operation.value)}${source.slice(node.range.end)}`
+  }
+
+  const attribute = node.attributes.find((item) => item.name === operation.name)
+  if (!attribute || !attribute.editable) throw new Error('The selected attribute is not editable')
+  const replacement = attribute.kind === 'static'
+    ? `${attribute.name}="${escapeAttribute(operation.value)}"`
+    : `:${attribute.name}="${escapeAttribute(operation.value)}"`
+  return `${source.slice(0, attribute.range.start)}${replacement}${source.slice(attribute.range.end)}`
 }
