@@ -1,6 +1,8 @@
 # 01: Selectable Document Tree
 
-**Status:** In progress
+**Status:** Complete
+
+**Completed:** 2026-08-08
 
 ## User Outcome
 
@@ -36,3 +38,10 @@ A user opens a Vue document, sees its template hierarchy, and can select a rende
 - Parser fixtures for elements, components, text, slots, and locked directives.
 - Protocol validation unit tests.
 - Browser test selecting the example hero and a feature card in both directions.
+
+## Completion Notes
+
+- Unit tests cover tree classification, structural locking, and ephemeral instrumentation.
+- Browser verification selected the hero heading from the tree and confirmed its preview outline.
+- Browser verification selected a rendered feature card and confirmed the matching component tree row.
+- Selection remained active after switching the canvas to the mobile viewport.

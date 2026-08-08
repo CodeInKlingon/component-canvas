@@ -10,6 +10,7 @@ import type {
   DesignerDocumentSummary,
   SaveDocumentRequest,
 } from '@vue-designer/shared'
+import { instrumentDesignerNodes, parseDesignerDocument } from '@vue-designer/shared'
 
 export interface VueDesignerOptions {
   documents: string | string[]
@@ -110,7 +111,37 @@ ${appPath ? `import setup from ${JSON.stringify(appPath)}` : 'const setup = null
 const app = createApp({ render: () => h(Document) })
 if (setup?.setup) await setup.setup(app)
 app.mount('#app')
+
+let selected
+function select(nodeId) {
+  selected?.style.removeProperty('outline')
+  selected?.style.removeProperty('outline-offset')
+  selected = nodeId ? document.querySelector('[data-vue-designer-id="' + CSS.escape(nodeId) + '"]') : null
+  selected?.style.setProperty('outline', '2px solid #78b82a')
+  selected?.style.setProperty('outline-offset', '3px')
+}
+document.addEventListener('click', (event) => {
+  const target = event.target instanceof Element ? event.target.closest('[data-vue-designer-id]') : null
+  const nodeId = target?.getAttribute('data-vue-designer-id')
+  if (!nodeId) return
+  event.preventDefault()
+  event.stopPropagation()
+  select(nodeId)
+  parent.postMessage({ channel: 'vue-designer', type: 'select', nodeId }, '*')
+}, true)
+addEventListener('message', (event) => {
+  const message = event.data
+  if (message?.channel === 'vue-designer' && message.type === 'select') select(message.nodeId)
+})
 `
+    },
+    transform(code, id) {
+      const filePath = path.resolve(id.split('?')[0] ?? id)
+      const isDocument = [...documentFiles.values()].some(
+        (documentPath) => path.resolve(documentPath) === filePath,
+      )
+      if (!isDocument) return
+      return { code: instrumentDesignerNodes(code), map: null }
     },
     configResolved(resolvedConfig) {
       config = resolvedConfig
@@ -138,11 +169,14 @@ app.mount('#app')
 
             if (request.method === 'GET') {
               const source = await fs.readFile(absolutePath, 'utf8')
+              const parsed = parseDesignerDocument(source)
               const document: DesignerDocument = {
                 path: relativePath,
                 name: path.basename(relativePath, path.extname(relativePath)),
                 source,
                 revision: revision(source),
+                tree: parsed.tree,
+                diagnostics: parsed.diagnostics,
               }
               return json(response, 200, document)
             }

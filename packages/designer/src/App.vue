@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type {
   DesignerApiError,
   DesignerDocument,
   DesignerDocumentSummary,
   SaveDocumentResponse,
+  DesignerNode,
 } from '@vue-designer/shared'
+import { isPreviewToEditorMessage } from '@vue-designer/shared'
+import TreeNode from './TreeNode.vue'
 
 type SaveState = 'clean' | 'dirty' | 'saving' | 'conflict'
 
@@ -17,6 +20,8 @@ const loading = ref(true)
 const saveState = ref<SaveState>('clean')
 const previewVersion = ref(0)
 const viewportWidth = ref<'100%' | '768px' | '390px'>('100%')
+const previewFrame = ref<HTMLIFrameElement | null>(null)
+const selectedNodeId = ref<string | null>(null)
 
 const previewUrl = computed(() => {
   if (!activeDocument.value) return ''
@@ -62,6 +67,7 @@ async function openDocument(document: DesignerDocumentSummary): Promise<void> {
     activeDocument.value = loaded
     source.value = loaded.source
     saveState.value = 'clean'
+    selectedNodeId.value = null
     previewVersion.value += 1
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Unable to open document'
@@ -105,6 +111,22 @@ async function reload(): Promise<void> {
   }
 }
 
+function selectNode(node: DesignerNode): void {
+  selectedNodeId.value = node.id
+  if (node.kind !== 'text') {
+    previewFrame.value?.contentWindow?.postMessage({
+      channel: 'vue-designer',
+      type: 'select',
+      nodeId: node.id,
+    }, '*')
+  }
+}
+
+function handlePreviewMessage(event: MessageEvent): void {
+  if (event.source !== previewFrame.value?.contentWindow || !isPreviewToEditorMessage(event.data)) return
+  selectedNodeId.value = event.data.nodeId
+}
+
 function handleShortcut(event: KeyboardEvent): void {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
     event.preventDefault()
@@ -114,7 +136,13 @@ function handleShortcut(event: KeyboardEvent): void {
 
 onMounted(() => {
   window.addEventListener('keydown', handleShortcut)
+  window.addEventListener('message', handlePreviewMessage)
   void loadDocuments()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleShortcut)
+  window.removeEventListener('message', handlePreviewMessage)
 })
 </script>
 
@@ -155,6 +183,19 @@ onMounted(() => {
           <span><strong>{{ document.name }}</strong><small>{{ document.path }}</small></span>
         </button>
         <div v-if="!loading && documents.length === 0" class="empty-state">No Vue documents match the configured pattern.</div>
+        <div v-if="activeDocument" class="layers-heading">Layers</div>
+        <ul v-if="activeDocument" class="tree-list">
+          <TreeNode
+            v-for="node in activeDocument.tree"
+            :key="node.id"
+            :node="node"
+            :selected-id="selectedNodeId"
+            @select="selectNode"
+          />
+        </ul>
+        <div v-if="activeDocument?.diagnostics.length" class="tree-diagnostic">
+          {{ activeDocument.diagnostics[0]?.message }}
+        </div>
       </aside>
 
       <section class="canvas-panel">
@@ -163,6 +204,7 @@ onMounted(() => {
           <div class="preview-frame" :style="{ width: viewportWidth }">
             <iframe
               v-if="previewUrl"
+              ref="previewFrame"
               :key="previewUrl"
               :src="previewUrl"
               sandbox="allow-scripts"

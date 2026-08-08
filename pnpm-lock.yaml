@@ -66,6 +66,13 @@ importers:
         version: 2.2.12(typescript@5.9.3)
 
   packages/shared:
+    dependencies:
+      '@vue/compiler-dom':
+        specifier: ^3.5.17
+        version: 3.5.41
+      '@vue/compiler-sfc':
+        specifier: ^3.5.17
+        version: 3.5.41
     devDependencies:
       typescript:
         specifier: ^5.8.3

@@ -4,7 +4,7 @@ These tickets are ordered by dependency. Each slice must leave the designer in a
 
 | Ticket | Slice | Outcome |
 | --- | --- | --- |
-| [01](01-selectable-document-tree.md) | Selectable document tree | Users can inspect and select editable or locked Vue nodes |
+| [01](01-selectable-document-tree.md) | Selectable document tree (complete) | Users can inspect and select editable or locked Vue nodes |
 | [02](02-live-text-and-attributes.md) | Live text and attributes | Users can edit simple content and preview it before saving |
 | [03](03-component-palette-and-insertion.md) | Component palette and insertion | Registered components can be inserted from a palette |
 | [04](04-structure-and-slots.md) | Structure and slots | Users can move, reorder, duplicate, and remove nodes safely |
