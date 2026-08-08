@@ -1,0 +1,15 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "vscode-browser": {
+      "type": "local",
+      "command": [
+        "node",
+        "C:\\Users\\Daniel\\AppData\\Roaming\\Code\\User\\globalStorage\\theozhao.vscode-browser-bridge\\stdio-bridge.mjs",
+        "--workspace",
+        "C:\\Users\\Daniel\\source\\repos\\vue-designer"
+      ],
+      "enabled": true
+    }
+  }
+}
