@@ -30,6 +30,18 @@ export interface VueDesignerOptions {
 const designerEntry = fileURLToPath(
   new URL('../../designer/src/main.ts', import.meta.url),
 )
+const candidateFileMarker = '.vue-designer-candidate-'
+
+export function createCandidateFileId(absolutePath: string, candidateId: string): string {
+  return `${absolutePath}${candidateFileMarker}${candidateId}.vue`
+}
+
+export function candidateIdFromFile(id: string): string | undefined {
+  const file = id.split('?')[0] ?? id
+  const marker = file.lastIndexOf(candidateFileMarker)
+  if (marker < 0 || !file.endsWith('.vue')) return
+  return file.slice(marker + candidateFileMarker.length, -4)
+}
 
 function revision(source: string): string {
   return createHash('sha256').update(source).digest('hex')
@@ -101,7 +113,6 @@ export default function vueDesigner(options: VueDesignerOptions): Plugin {
   let config: ResolvedConfig
   let documentFiles = new Map<string, string>()
   const previewEntryPrefix = '\0vue-designer:preview-entry?'
-  const candidateMarker = '?vue-designer-candidate='
   const candidates = new Map<string, { path: string; source: string }>()
   const capabilities = new CapabilityStore()
   let componentChecker: ComponentMetaChecker | undefined
@@ -155,6 +166,7 @@ export default function vueDesigner(options: VueDesignerOptions): Plugin {
       }
     },
     async resolveId(id) {
+      if (candidateIdFromFile(id)) return id
       if (id.startsWith('/__designer/preview-entry.js?')) {
         return `${previewEntryPrefix}${id.slice(id.indexOf('?') + 1)}`
       }
@@ -164,13 +176,13 @@ export default function vueDesigner(options: VueDesignerOptions): Plugin {
         if (!candidate) throw new Error('Preview candidate expired')
         const absolutePath = await resolveDocument(candidate.path)
         if (!absolutePath) throw new Error('Preview document not found')
-        return `${absolutePath}${candidateMarker}${candidateId}`
+        return createCandidateFileId(absolutePath, candidateId)
       }
     },
     async load(id) {
-      if (id.includes(candidateMarker)) {
-        const candidateId = id.slice(id.indexOf(candidateMarker) + candidateMarker.length)
-        const candidate = candidates.get(candidateId)
+      const virtualCandidateId = candidateIdFromFile(id)
+      if (virtualCandidateId && !id.includes('?vue&type=')) {
+        const candidate = candidates.get(virtualCandidateId)
         if (!candidate) throw new Error('Preview candidate expired')
         return candidate.source
       }
@@ -270,7 +282,7 @@ addEventListener('message', (event) => {
 `
     },
     transform(code, id) {
-      if (id.includes(candidateMarker)) return { code: instrumentDesignerNodes(code), map: null }
+      if (candidateIdFromFile(id) && !id.includes('?vue&type=')) return { code: instrumentDesignerNodes(code), map: null }
       const filePath = path.resolve(id.split('?')[0] ?? id)
       const isDocument = [...documentFiles.values()].some(
         (documentPath) => path.resolve(documentPath) === filePath,

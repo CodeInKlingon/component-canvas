@@ -23,6 +23,12 @@ import FeatureCard from '../components/FeatureCard.vue'
       <FeatureCard number="02" title="Build in context">Compose real components where content, behavior, and design stay connected.</FeatureCard>
       <FeatureCard number="03" title="Keep the source">Every decision remains readable Vue code that belongs to your project.</FeatureCard>
     </section>
+    <div class="designer-node-27">
+      <ol :reversed="false"><li>List item</li>
+      <li>List item</li>
+    </ol>
+      <ul><li>List item</li></ul>
+    </div>
   </main>
 </template>
 
@@ -38,4 +44,10 @@ h1 em { color: #687b5d; font-weight: 500; }
 .intro { max-width: 560px; margin: 32px auto; color: #656d62; font-size: 17px; line-height: 1.7; }
 .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; max-width: 1100px; margin: auto; }
 @media (max-width: 700px) { nav > span { display: none; } .features { grid-template-columns: 1fr; } }
+
+.designer-node-27 {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 </style>
