@@ -1,6 +1,6 @@
 # 00a: Resizable And Hideable Panels
 
-**Status:** Planned
+**Status:** Superseded by ticket 11
 
 ## User Outcome
 

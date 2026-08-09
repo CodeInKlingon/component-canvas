@@ -23,12 +23,6 @@ import FeatureCard from '../components/FeatureCard.vue'
       <FeatureCard number="02" title="Build in context">Compose real components where content, behavior, and design stay connected.</FeatureCard>
       <FeatureCard number="03" title="Keep the source">Every decision remains readable Vue code that belongs to your project.</FeatureCard>
     </section>
-    <div class="designer-node-27">
-      <ol :reversed="false"><li>List item</li>
-      <li>List item</li>
-    </ol>
-      <ul><li>List item</li></ul>
-    </div>
   </main>
 </template>
 

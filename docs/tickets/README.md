@@ -4,7 +4,7 @@ These tickets are ordered by dependency. Each slice must leave the designer in a
 
 | Ticket | Slice | Outcome |
 | --- | --- | --- |
-| [00a](00a-resizable-hideable-panels.md) | Resizable and hideable panels | Users can tailor workspace space without losing editor state |
+| [00a](00a-resizable-hideable-panels.md) | Resizable and hideable panels (superseded by 11) | Requirements moved into the broader editor UI polish ticket |
 | [01](01-selectable-document-tree.md) | Selectable document tree (complete) | Users can inspect and select editable or locked Vue nodes |
 | [02](02-live-text-and-attributes.md) | Live text and attributes (complete) | Users can edit simple content and preview it before saving |
 | [03](03-component-palette-and-insertion.md) | Component palette and insertion (complete) | Registered components can be inserted from a palette |
@@ -17,6 +17,7 @@ These tickets are ordered by dependency. Each slice must leave the designer in a
 | [08](08-preview-diagnostics-and-isolation.md) | Preview isolation | Preview failures are visible and untrusted code is strongly isolated |
 | [09](09-mvp-hardening.md) | MVP hardening | Core workflows are covered by integration and adversarial tests |
 | [10](10-browser-isolated-preview-spike.md) | Browser-isolated preview spike | AlmostNode is evaluated for running untrusted Vue and Vite build code in the browser |
+| [11](11-editor-ui-polish.md) | Editor UI polish | Light and dark themes, adaptable panels, and collapsible palettes make the workspace cohesive and configurable |
 
 ## Working Agreement
 
