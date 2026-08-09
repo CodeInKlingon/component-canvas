@@ -1,6 +1,6 @@
 # 07: History, Source, And File Sync
 
-**Status:** In progress
+**Status:** Complete
 
 ## User Outcome
 

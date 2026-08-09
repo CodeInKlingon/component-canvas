@@ -17,6 +17,7 @@ import type {
 import { applySourceOperation, isPreviewToEditorMessage, parseDesignerDocument } from '@vue-designer/shared'
 import TreeNode from './TreeNode.vue'
 import { SourceHistory } from './history'
+import { findNode, findNodeAtOffset, findNodeAtPath, findNodePath } from './selection'
 
 type SaveState = 'clean' | 'dirty' | 'saving' | 'conflict'
 
@@ -44,16 +45,6 @@ const historyVersion = ref(0)
 const history = new SourceHistory()
 let sourcePreviewTimer: number | undefined
 let candidateRequest = 0
-
-function findNode(nodes: DesignerNode[], id: string | null): DesignerNode | null {
-  if (!id) return null
-  for (const node of nodes) {
-    if (node.id === id) return node
-    const child = findNode(node.children, id)
-    if (child) return child
-  }
-  return null
-}
 
 const selectedNode = computed(() => findNode(activeDocument.value?.tree ?? [], selectedNodeId.value))
 const selectedComponent = computed(() => selectedNode.value?.kind === 'component'
@@ -188,7 +179,7 @@ function removeSelectedNode(): void {
 }
 
 async function openDocument(document: DesignerDocumentSummary): Promise<void> {
-  if (saveState.value === 'dirty' && !window.confirm('Discard unsaved changes?')) return
+  if ((saveState.value === 'dirty' || saveState.value === 'conflict') && !window.confirm('Discard unsaved changes?')) return
   error.value = ''
   try {
     const loaded = await api<DesignerDocument>(`/__designer/api/document?path=${encodeURIComponent(document.path)}`)
@@ -220,10 +211,14 @@ function commitSourceEdit(): void {
 async function createCandidate(candidateSource: string): Promise<void> {
   const document = activeDocument.value
   if (!document) return
+  const selectedPath = findNodePath(document.tree, selectedNodeId.value)
   if (candidateSource === document.source) {
     const parsed = parseDesignerDocument(candidateSource)
     candidateId.value = null
     activeDocument.value = { ...document, tree: parsed.tree, diagnostics: parsed.diagnostics }
+    selectedNodeId.value = findNode(parsed.tree, selectedNodeId.value)?.id
+      ?? findNodeAtPath(parsed.tree, selectedPath)?.id
+      ?? null
     saveState.value = 'clean'
     error.value = ''
     return
@@ -239,7 +234,9 @@ async function createCandidate(candidateSource: string): Promise<void> {
     if (request !== candidateRequest || source.value !== candidateSource) return
     candidateId.value = result.candidateId
     activeDocument.value = { ...document, tree: result.tree, diagnostics: result.diagnostics }
-    if (selectedNodeId.value && !findNode(result.tree, selectedNodeId.value)) selectedNodeId.value = null
+    selectedNodeId.value = findNode(result.tree, selectedNodeId.value)?.id
+      ?? findNodeAtPath(result.tree, selectedPath)?.id
+      ?? null
     error.value = ''
   } catch (cause) {
     if (request !== candidateRequest) return
@@ -342,6 +339,7 @@ function updateStyle(property: string, event: Event): void {
   const value = (event.target as HTMLInputElement | HTMLSelectElement).value
   const document = activeDocument.value
   if (!document) return
+  const selectedPath = findNodePath(document.tree, selectedNodeId.value)
   void api<DesignerStyleCandidateResponse>('/__designer/api/style-candidate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -356,6 +354,9 @@ function updateStyle(property: string, event: Event): void {
     candidateId.value = result.candidateId
     styleRules.value = result.rules
     activeDocument.value = { ...document, tree: result.tree, diagnostics: result.diagnostics }
+    selectedNodeId.value = findNode(result.tree, selectedNodeId.value)?.id
+      ?? findNodeAtPath(result.tree, selectedPath)?.id
+      ?? null
     saveState.value = result.source === document.source ? 'clean' : 'dirty'
     previewFrame.value?.contentWindow?.postMessage({
       channel: 'vue-designer',
@@ -448,7 +449,7 @@ function redo(): void {
   void restoreHistory(history.redo())
 }
 
-function selectNode(node: DesignerNode): void {
+function selectNode(node: DesignerNode, revealInSource = true): void {
   selectedNodeId.value = node.id
   activeStyleSelector.value = ''
   computedStyles.value = {}
@@ -460,7 +461,7 @@ function selectNode(node: DesignerNode): void {
       nodeId: node.id,
     }, '*')
   }
-  if (inspectorView.value === 'source') {
+  if (revealInSource && inspectorView.value === 'source') {
     requestAnimationFrame(() => {
       sourceEditor.value?.focus()
       sourceEditor.value?.setSelectionRange(node.range.start, node.range.end)
@@ -471,17 +472,8 @@ function selectNode(node: DesignerNode): void {
 function syncSelectionFromSource(): void {
   const offset = sourceEditor.value?.selectionStart
   if (offset === undefined) return
-  let match: DesignerNode | null = null
-  const visit = (nodes: DesignerNode[]) => {
-    for (const node of nodes) {
-      if (node.range.start <= offset && offset <= node.range.end) {
-        match = node
-        visit(node.children)
-      }
-    }
-  }
-  visit(activeDocument.value?.tree ?? [])
-  if (match) selectNode(match)
+  const match = findNodeAtOffset(activeDocument.value?.tree ?? [], offset)
+  if (match) selectNode(match, false)
 }
 
 function handleExternalChange(change: DesignerDocumentChangedEvent): void {
