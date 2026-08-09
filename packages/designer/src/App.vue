@@ -32,6 +32,9 @@ const saveState = ref<SaveState>('clean')
 const previewVersion = ref(0)
 const viewportWidth = ref<'100%' | '768px' | '390px'>('100%')
 const previewFrame = ref<HTMLIFrameElement | null>(null)
+const previewOrigin = ref('')
+const previewSession = ref(crypto.randomUUID())
+const previewDiagnostic = ref<{ level: 'error' | 'warning' | 'info'; message: string; stack?: string } | null>(null)
 const sourceEditor = ref<InstanceType<typeof SourceEditor> | null>(null)
 const selectedNodeId = ref<string | null>(null)
 const candidateId = ref<string | null>(null)
@@ -46,6 +49,7 @@ const historyVersion = ref(0)
 const history = new SourceHistory()
 let sourcePreviewTimer: number | undefined
 let candidateRequest = 0
+let apiCapability = ''
 
 const selectedNode = computed(() => findNode(activeDocument.value?.tree ?? [], selectedNodeId.value))
 const selectedComponent = computed(() => selectedNode.value?.kind === 'component'
@@ -72,13 +76,14 @@ function recordSource(candidateSource: string): void {
 }
 
 const previewUrl = computed(() => {
-  if (!activeDocument.value) return ''
+  if (!activeDocument.value || !previewOrigin.value) return ''
   const params = new URLSearchParams({
     path: activeDocument.value.path,
     version: String(previewVersion.value),
+    session: previewSession.value,
   })
   if (candidateId.value) params.set('candidate', candidateId.value)
-  return `/__designer/preview?${params}`
+  return `${previewOrigin.value}/__designer/preview?${params}`
 })
 
 const stateLabel = computed(() => ({
@@ -88,8 +93,20 @@ const stateLabel = computed(() => ({
   conflict: 'External change',
 })[saveState.value])
 
-async function api<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init)
+async function api<T>(url: string, init?: RequestInit, retry = true): Promise<T> {
+  if (!apiCapability) {
+    const session = await fetch('/__designer/api/session', { method: 'POST' })
+    const body = await session.json() as { token: string }
+    if (!session.ok || typeof body.token !== 'string') throw new Error('Unable to establish designer session')
+    apiCapability = body.token
+  }
+  const headers = new Headers(init?.headers)
+  headers.set('Authorization', `Bearer ${apiCapability}`)
+  let response = await fetch(url, { ...init, headers })
+  if (response.status === 401 && retry) {
+    apiCapability = ''
+    return api<T>(url, init, false)
+  }
   const body = await response.json() as T | DesignerApiError
   if (!response.ok) throw Object.assign(new Error((body as DesignerApiError).error), { status: response.status })
   return body as T
@@ -99,12 +116,14 @@ async function loadDocuments(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const [loadedDocuments, loadedComponents] = await Promise.all([
+    const [loadedDocuments, loadedComponents, config] = await Promise.all([
       api<DesignerDocumentSummary[]>('/__designer/api/documents'),
       api<DesignerComponentMetadata[]>('/__designer/api/components'),
+      api<{ previewOrigin: string }>('/__designer/api/config'),
     ])
     documents.value = loadedDocuments
     components.value = loadedComponents
+    previewOrigin.value = config.previewOrigin
     if (documents.value[0]) await openDocument(documents.value[0])
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Unable to load documents'
@@ -192,6 +211,8 @@ async function openDocument(document: DesignerDocumentSummary): Promise<void> {
     externalRevision.value = null
     selectedNodeId.value = null
     candidateId.value = null
+    previewSession.value = crypto.randomUUID()
+    previewDiagnostic.value = null
     previewVersion.value += 1
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Unable to open document'
@@ -212,6 +233,7 @@ function commitSourceEdit(): void {
 async function createCandidate(candidateSource: string): Promise<void> {
   const document = activeDocument.value
   if (!document) return
+  previewDiagnostic.value = null
   const selectedPath = findNodePath(document.tree, selectedNodeId.value)
   if (candidateSource === document.source) {
     const parsed = parseDesignerDocument(candidateSource)
@@ -340,6 +362,7 @@ function updateStyle(property: string, event: Event): void {
   const value = (event.target as HTMLInputElement | HTMLSelectElement).value
   const document = activeDocument.value
   if (!document) return
+  previewDiagnostic.value = null
   const selectedPath = findNodePath(document.tree, selectedNodeId.value)
   void api<DesignerStyleCandidateResponse>('/__designer/api/style-candidate', {
     method: 'POST',
@@ -361,6 +384,7 @@ function updateStyle(property: string, event: Event): void {
     saveState.value = result.source === document.source ? 'clean' : 'dirty'
     previewFrame.value?.contentWindow?.postMessage({
       channel: 'vue-designer',
+      session: previewSession.value,
       type: 'apply-style',
       nodeId: node.id,
       property,
@@ -458,6 +482,7 @@ function selectNode(node: DesignerNode, revealInSource = true): void {
   if (node.kind !== 'text') {
     previewFrame.value?.contentWindow?.postMessage({
       channel: 'vue-designer',
+      session: previewSession.value,
       type: 'select',
       nodeId: node.id,
     }, '*')
@@ -489,12 +514,24 @@ function handleExternalChange(change: DesignerDocumentChangedEvent): void {
 
 function handlePreviewMessage(event: MessageEvent): void {
   if (event.source !== previewFrame.value?.contentWindow || !isPreviewToEditorMessage(event.data)) return
+  if (event.data.session !== previewSession.value) return
+  if (event.data.type === 'ready') return
+  if (event.data.type === 'diagnostic') {
+    previewDiagnostic.value = event.data
+    return
+  }
   if (event.data.type === 'computed-style') {
     if (event.data.nodeId === selectedNodeId.value) computedStyles.value = event.data.styles
     return
   }
   const node = findNode(activeDocument.value?.tree ?? [], event.data.nodeId)
   if (node) selectNode(node)
+}
+
+function reloadPreview(): void {
+  previewDiagnostic.value = null
+  previewSession.value = crypto.randomUUID()
+  previewVersion.value += 1
 }
 
 function handlePreviewLoad(): void {
@@ -765,11 +802,16 @@ onUnmounted(() => {
       </aside>
     </main>
 
-    <div v-if="error" class="diagnostic">
-      <span>{{ error }}</span>
+    <div v-if="error || previewDiagnostic" class="diagnostic">
+      <span>{{ error || previewDiagnostic?.message }}</span>
+      <details v-if="previewDiagnostic?.stack">
+        <summary>Details</summary>
+        <pre>{{ previewDiagnostic.stack }}</pre>
+      </details>
       <button v-if="saveState === 'conflict'" @click="reload">Reload from disk</button>
       <button v-if="saveState === 'conflict' && externalRevision" @click="keepLocalChanges">Overwrite disk</button>
-      <button @click="error = ''">Dismiss</button>
+      <button v-if="previewDiagnostic" @click="reloadPreview">Reload preview</button>
+      <button @click="error = ''; previewDiagnostic = null">Dismiss</button>
     </div>
   </div>
 </template>

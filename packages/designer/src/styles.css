@@ -144,4 +144,7 @@ button { color: inherit; }
 .source-editor-status { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #292e29; padding: 0 10px; color: #697169; background: #171a17; font-size: 9px; }
 .diagnostic { position: fixed; z-index: 5; left: 246px; right: 18px; bottom: 18px; display: flex; align-items: center; gap: 10px; padding: 11px 13px; border: 1px solid #7f4a44; border-radius: 8px; background: #321f1dcc; backdrop-filter: blur(12px); color: #ffc3bc; font-size: 11px; box-shadow: 0 8px 30px #0008; }
 .diagnostic span { flex: 1; }
+.diagnostic details { min-width: 0; }
+.diagnostic summary { cursor: pointer; color: #d9a49e; }
+.diagnostic pre { position: absolute; right: 0; bottom: calc(100% + 6px); width: min(720px, 100%); max-height: 240px; overflow: auto; margin: 0; border: 1px solid #70413d; border-radius: 8px; padding: 10px; background: #231514; color: #f3c5bf; white-space: pre-wrap; }
 .diagnostic button { border: 1px solid #88564f; border-radius: 5px; background: #4a2d29; padding: 5px 8px; font-size: 10px; cursor: pointer; }

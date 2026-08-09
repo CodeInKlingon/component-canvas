@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
-import type { IncomingMessage, ServerResponse } from 'node:http'
+import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fg from 'fast-glob'
@@ -18,11 +18,13 @@ import type {
 } from '@vue-designer/shared'
 import { instrumentDesignerNodes, parseDesignerDocument } from '@vue-designer/shared'
 import { applyStyleOperation, getDesignerStyleRules } from '@vue-designer/shared/style'
+import { CapabilityStore } from './capabilities.ts'
 
 export interface VueDesignerOptions {
   documents: string | string[]
   app?: string
   components?: string
+  previewPort?: number
 }
 
 const designerEntry = fileURLToPath(
@@ -101,7 +103,9 @@ export default function vueDesigner(options: VueDesignerOptions): Plugin {
   const previewEntryPrefix = '\0vue-designer:preview-entry?'
   const candidateMarker = '?vue-designer-candidate='
   const candidates = new Map<string, { path: string; source: string }>()
+  const capabilities = new CapabilityStore()
   let componentChecker: ComponentMetaChecker | undefined
+  let previewOrigin = ''
 
   async function discoverDocuments(): Promise<DesignerDocumentSummary[]> {
     const patterns = Array.isArray(options.documents)
@@ -135,6 +139,21 @@ export default function vueDesigner(options: VueDesignerOptions): Plugin {
   return {
     name: 'vue-designer',
     enforce: 'pre',
+    config() {
+      const vueFeatureFlags = {
+        __VUE_OPTIONS_API__: 'true',
+        __VUE_PROD_DEVTOOLS__: 'false',
+        __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: 'false',
+      }
+      return {
+        define: vueFeatureFlags,
+        optimizeDeps: {
+          esbuildOptions: {
+            define: vueFeatureFlags,
+          },
+        },
+      }
+    },
     async resolveId(id) {
       if (id.startsWith('/__designer/preview-entry.js?')) {
         return `${previewEntryPrefix}${id.slice(id.indexOf('?') + 1)}`
@@ -159,6 +178,8 @@ export default function vueDesigner(options: VueDesignerOptions): Plugin {
 
       const params = new URLSearchParams(id.slice(previewEntryPrefix.length))
       const relativePath = params.get('path') ?? ''
+      const previewSession = params.get('session') ?? ''
+      if (!previewSession) throw new Error('Preview session is required')
       const absolutePath = await resolveDocument(relativePath)
       if (!absolutePath) throw new Error('Preview document not found')
       const candidateId = params.get('candidate')
@@ -171,11 +192,43 @@ export default function vueDesigner(options: VueDesignerOptions): Plugin {
         : absolutePath
       return `
 import { createApp, h } from 'vue'
-import Document from ${JSON.stringify(documentImport)}
-${appPath ? `import setup from ${JSON.stringify(appPath)}` : 'const setup = null'}
+const session = ${JSON.stringify(previewSession)}
+const send = (message) => parent.postMessage({ channel: 'vue-designer', session, ...message }, '*')
+const describe = (value) => value instanceof Error
+  ? { message: value.message, stack: value.stack }
+  : { message: typeof value === 'string' ? value : JSON.stringify(value) }
+
+addEventListener('error', (event) => send({ type: 'diagnostic', level: 'error', ...describe(event.error ?? event.message) }))
+addEventListener('unhandledrejection', (event) => send({ type: 'diagnostic', level: 'error', ...describe(event.reason) }))
+for (const level of ['warn', 'error']) {
+  const original = console[level]
+  console[level] = (...values) => {
+    original(...values)
+    send({ type: 'diagnostic', level: level === 'warn' ? 'warning' : 'error', ...describe(values[0]) })
+  }
+}
+
+let Document
+let setup
+try {
+  [Document, setup] = await Promise.all([
+    import(${JSON.stringify(documentImport)}).then((module) => module.default),
+    ${appPath ? `import(${JSON.stringify(appPath)}).then((module) => module.default)` : 'Promise.resolve(null)'},
+  ])
+} catch (error) {
+  send({ type: 'diagnostic', level: 'error', ...describe(error) })
+  throw error
+}
+
 const app = createApp({ render: () => h(Document) })
-if (setup?.setup) await setup.setup(app)
-app.mount('#app')
+app.config.errorHandler = (error) => send({ type: 'diagnostic', level: 'error', ...describe(error) })
+try {
+  if (setup?.setup) await setup.setup(app)
+  app.mount('#app')
+  send({ type: 'ready' })
+} catch (error) {
+  send({ type: 'diagnostic', level: 'error', ...describe(error) })
+}
 
 let selected
 function select(nodeId) {
@@ -188,7 +241,7 @@ function select(nodeId) {
     const computed = getComputedStyle(selected)
     const properties = ['display', 'width', 'height', 'padding', 'margin', 'gap', 'font-size', 'font-weight', 'text-align', 'color', 'background-color', 'border', 'border-radius']
     const styles = Object.fromEntries(properties.map((property) => [property, computed.getPropertyValue(property)]))
-    parent.postMessage({ channel: 'vue-designer', type: 'computed-style', nodeId, styles }, '*')
+    send({ type: 'computed-style', nodeId, styles })
   }
 }
 document.addEventListener('click', (event) => {
@@ -197,14 +250,16 @@ document.addEventListener('click', (event) => {
   if (!nodeId) return
   event.preventDefault()
   event.stopPropagation()
-  parent.postMessage({ channel: 'vue-designer', type: 'select', nodeId }, '*')
+  send({ type: 'select', nodeId })
   select(nodeId)
 }, true)
 addEventListener('message', (event) => {
   const message = event.data
-  if (message?.channel !== 'vue-designer') return
-  if (message.type === 'select') select(message.nodeId)
+  if (message?.channel !== 'vue-designer' || message.session !== session) return
+  if (message.type === 'select' && (message.nodeId === null || typeof message.nodeId === 'string')) select(message.nodeId)
   if (message.type === 'apply-style') {
+    if (typeof message.nodeId !== 'string' || typeof message.property !== 'string'
+      || (message.value !== null && typeof message.value !== 'string')) return
     const target = document.querySelector('[data-vue-designer-id="' + CSS.escape(message.nodeId) + '"]')
     if (!(target instanceof HTMLElement)) return
     if (message.value) target.style.setProperty(message.property, message.value)
@@ -227,6 +282,89 @@ addEventListener('message', (event) => {
       config = resolvedConfig
     },
     configureServer(server) {
+      const startPreviewServer = () => {
+        const address = server.httpServer?.address()
+        if (!address || typeof address === 'string') return
+        const mainPort = address.port
+        const previewServer = createServer((request, response) => {
+          if (!request.url || request.url.startsWith('/__designer/api/')) {
+            response.statusCode = 403
+            return response.end('Preview access to designer APIs is forbidden')
+          }
+          if (request.url.startsWith('/@vite/client')) {
+            response.statusCode = 200
+            response.setHeader('Content-Type', 'text/javascript; charset=utf-8')
+            response.setHeader('Access-Control-Allow-Origin', '*')
+            return response.end(`
+const styles = new Map()
+export function createHotContext() {
+  return { data: {}, accept() {}, acceptExports() {}, dispose() {}, prune() {}, decline() {}, invalidate() {}, on() {}, off() {}, send() {} }
+}
+export function updateStyle(id, content) {
+  let style = styles.get(id)
+  if (!style) {
+    style = document.createElement('style')
+    style.setAttribute('data-vite-dev-id', id)
+    document.head.appendChild(style)
+    styles.set(id, style)
+  }
+  style.textContent = content
+}
+export function removeStyle(id) { styles.get(id)?.remove(); styles.delete(id) }
+export function injectQuery(url) { return url }
+`)
+          }
+          const proxy = httpRequest({
+            hostname: '127.0.0.1',
+            port: mainPort,
+            method: request.method,
+            path: request.url,
+            headers: { ...request.headers, host: `127.0.0.1:${mainPort}` },
+          }, (proxied) => {
+            response.statusCode = proxied.statusCode ?? 502
+            for (const [name, value] of Object.entries(proxied.headers)) {
+              if (value !== undefined && name !== 'content-security-policy') response.setHeader(name, value)
+            }
+            response.setHeader('Access-Control-Allow-Origin', '*')
+            if (request.url?.startsWith('/__designer/preview?')) {
+              const origin = previewOrigin
+              const websocketOrigin = origin.replace('http:', 'ws:')
+              response.setHeader('Content-Security-Policy', `default-src 'none'; script-src ${origin}; style-src 'unsafe-inline' https://fonts.googleapis.com; img-src ${origin} data: blob:; font-src ${origin} data: https://fonts.gstatic.com; connect-src ${origin} ${websocketOrigin}; base-uri 'none'; form-action 'none'`)
+            }
+            proxied.pipe(response)
+          })
+          proxy.on('error', () => {
+            if (!response.headersSent) response.statusCode = 502
+            response.end('Preview proxy unavailable')
+          })
+          request.pipe(proxy)
+        })
+        previewServer.on('upgrade', (request, socket, head) => {
+          const proxy = httpRequest({
+            hostname: '127.0.0.1',
+            port: mainPort,
+            method: request.method,
+            path: request.url,
+            headers: { ...request.headers, host: `127.0.0.1:${mainPort}` },
+          })
+          proxy.on('upgrade', (response, proxySocket, proxyHead) => {
+            socket.write(`HTTP/1.1 101 Switching Protocols\r\n${Object.entries(response.headers).map(([name, value]) => `${name}: ${value}`).join('\r\n')}\r\n\r\n`)
+            if (head.length) proxySocket.write(head)
+            if (proxyHead.length) socket.write(proxyHead)
+            proxySocket.pipe(socket).pipe(proxySocket)
+          })
+          proxy.on('error', () => socket.destroy())
+          proxy.end()
+        })
+        previewServer.listen(options.previewPort ?? 0, '127.0.0.1', () => {
+          const previewAddress = previewServer.address()
+          if (previewAddress && typeof previewAddress !== 'string') previewOrigin = `http://127.0.0.1:${previewAddress.port}`
+        })
+        server.httpServer?.once('close', () => previewServer.close())
+      }
+      if (server.httpServer?.listening) startPreviewServer()
+      else server.httpServer?.once('listening', startPreviewServer)
+
       server.watcher.on('change', async (changedPath) => {
         const absoluteChangedPath = path.resolve(changedPath)
         const entry = [...documentFiles].find(([, absolutePath]) => path.resolve(absolutePath) === absoluteChangedPath)
@@ -250,6 +388,20 @@ addEventListener('message', (event) => {
         }
 
         try {
+          if (request.method === 'POST' && url.pathname === '/__designer/api/session') {
+            return json(response, 201, capabilities.issue())
+          }
+
+          if (request.method === 'GET' && url.pathname === '/__designer/api/config') {
+            if (!previewOrigin) return json(response, 503, { error: 'Preview server is starting' })
+            return json(response, 200, { previewOrigin })
+          }
+
+          if (url.pathname.startsWith('/__designer/api/')
+            && !capabilities.accepts(request.headers.authorization)) {
+            return json(response, 401, { error: 'Missing or expired designer capability' })
+          }
+
           if (request.method === 'GET' && url.pathname === '/__designer/api/documents') {
             return json(response, 200, await discoverDocuments())
           }
@@ -400,11 +552,18 @@ addEventListener('message', (event) => {
             }
 
             const entryParams = new URLSearchParams({ path: relativePath })
+            const previewSession = url.searchParams.get('session') ?? ''
+            if (!previewSession) {
+              response.statusCode = 400
+              return response.end('Preview session is required')
+            }
+            entryParams.set('session', previewSession)
             const candidateId = url.searchParams.get('candidate')
             if (candidateId) entryParams.set('candidate', candidateId)
             response.statusCode = 200
             response.setHeader('Content-Type', 'text/html; charset=utf-8')
             response.setHeader('Cache-Control', 'no-store')
+            response.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'")
             response.end(`<!doctype html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body><div id="app"></div><script type="module" src="/__designer/preview-entry.js?${entryParams}"></script></body></html>`)

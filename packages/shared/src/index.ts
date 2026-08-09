@@ -131,19 +131,36 @@ export type DesignerSourceOperation =
     }
 
 export type PreviewToEditorMessage =
-  | { channel: 'vue-designer'; type: 'select'; nodeId: string }
-  | { channel: 'vue-designer'; type: 'computed-style'; nodeId: string; styles: Record<string, string> }
+  | { channel: 'vue-designer'; session: string; type: 'ready' }
+  | { channel: 'vue-designer'; session: string; type: 'select'; nodeId: string }
+  | { channel: 'vue-designer'; session: string; type: 'computed-style'; nodeId: string; styles: Record<string, string> }
+  | { channel: 'vue-designer'; session: string; type: 'diagnostic'; level: 'error' | 'warning' | 'info'; message: string; stack?: string }
 
 export type EditorToPreviewMessage =
-  | { channel: 'vue-designer'; type: 'select'; nodeId: string | null }
-  | { channel: 'vue-designer'; type: 'apply-style'; nodeId: string; property: string; value: string | null }
+  | { channel: 'vue-designer'; session: string; type: 'select'; nodeId: string | null }
+  | { channel: 'vue-designer'; session: string; type: 'apply-style'; nodeId: string; property: string; value: string | null }
 
 export function isPreviewToEditorMessage(value: unknown): value is PreviewToEditorMessage {
   if (!value || typeof value !== 'object') return false
   const message = value as Record<string, unknown>
-  if (message.channel !== 'vue-designer' || typeof message.nodeId !== 'string') return false
+  if (message.channel !== 'vue-designer' || typeof message.session !== 'string') return false
+  if (message.type === 'ready') return true
+  if (message.type === 'diagnostic') {
+    return ['error', 'warning', 'info'].includes(String(message.level)) && typeof message.message === 'string'
+      && (message.stack === undefined || typeof message.stack === 'string')
+  }
+  if (typeof message.nodeId !== 'string') return false
   if (message.type === 'select') return true
   return message.type === 'computed-style' && !!message.styles && typeof message.styles === 'object'
+}
+
+export function isEditorToPreviewMessage(value: unknown): value is EditorToPreviewMessage {
+  if (!value || typeof value !== 'object') return false
+  const message = value as Record<string, unknown>
+  if (message.channel !== 'vue-designer' || typeof message.session !== 'string') return false
+  if (message.type === 'select') return message.nodeId === null || typeof message.nodeId === 'string'
+  return message.type === 'apply-style' && typeof message.nodeId === 'string'
+    && typeof message.property === 'string' && (message.value === null || typeof message.value === 'string')
 }
 
 export { applySourceOperation, instrumentDesignerNodes, parseDesignerDocument } from './parse.ts'
