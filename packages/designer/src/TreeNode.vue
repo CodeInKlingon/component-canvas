@@ -7,6 +7,7 @@ const props = defineProps<{
   selectedId: string | null
   depth?: number
   dragKind?: 'component' | 'node' | null
+  draggedNode?: DesignerNode | null
 }>()
 
 const emit = defineEmits<{
@@ -16,32 +17,53 @@ const emit = defineEmits<{
   dropNode: [target: DesignerNode, position: 'before' | 'inside' | 'after']
 }>()
 
-const dropPosition = ref<'before' | 'inside' | 'after' | null>(null)
+type DropIntent = 'before' | 'inside' | 'append' | 'after'
 
-function handleDragOver(event: DragEvent): void {
-  if (!props.node.editable || !props.dragKind) return
-  event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
-  if (props.dragKind === 'component') {
-    dropPosition.value = props.node.kind === 'text' ? null : 'inside'
-    return
+const dropIntent = ref<DropIntent | null>(null)
+
+function canDrop(intent: DropIntent): boolean {
+  if (!props.node.editable || !props.dragKind) return false
+  if (props.dragKind === 'node' && props.draggedNode) {
+    const isSelf = props.node.id === props.draggedNode.id
+    const isDescendant = props.node.range.start >= props.draggedNode.range.start
+      && props.node.range.end <= props.draggedNode.range.end
+    if (isSelf || isDescendant) return false
+    const isAlreadyLastChild = (intent === 'inside' || intent === 'append')
+      && props.node.children.at(-1)?.id === props.draggedNode.id
+    if (isAlreadyLastChild) return false
   }
-  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  const ratio = (event.clientY - rect.top) / rect.height
-  dropPosition.value = ratio < 0.25 ? 'before' : ratio > 0.75 ? 'after' : props.node.kind === 'text' ? 'after' : 'inside'
+  if ((intent === 'inside' || intent === 'append') && props.node.kind === 'text') return false
+  if ((intent === 'before' || intent === 'after') && props.dragKind === 'component') return false
+  return true
 }
 
-function handleDragLeave(event: DragEvent): void {
-  const currentTarget = event.currentTarget as HTMLElement
-  if (event.relatedTarget instanceof Node && currentTarget.contains(event.relatedTarget)) return
-  dropPosition.value = null
+function handleDragOver(event: DragEvent, intent: DropIntent): void {
+  if (!canDrop(intent)) return
+  event.preventDefault()
+  event.stopPropagation()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = props.dragKind === 'component' ? 'copy' : 'move'
+  dropIntent.value = intent
 }
 
-function handleDrop(): void {
-  if (!dropPosition.value) return
-  const position = dropPosition.value
-  dropPosition.value = null
-  emit('dropNode', props.node, position)
+function handleDragLeave(event: DragEvent, intent: DropIntent): void {
+  event.stopPropagation()
+  if (dropIntent.value === intent) dropIntent.value = null
+}
+
+function handleDrop(event: DragEvent, intent: DropIntent): void {
+  if (!canDrop(intent)) return
+  event.preventDefault()
+  event.stopPropagation()
+  dropIntent.value = null
+  emit('dropNode', props.node, intent === 'append' ? 'inside' : intent)
+}
+
+function handleDragStart(event: DragEvent): void {
+  if (!props.node.editable) return
+  event.stopPropagation()
+  event.dataTransfer?.setData('application/x-vue-designer-node', props.node.id)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+  emit('dragNode', props.node)
 }
 
 function handleChildDrop(target: DesignerNode, position: 'before' | 'inside' | 'after'): void {
@@ -50,27 +72,32 @@ function handleChildDrop(target: DesignerNode, position: 'before' | 'inside' | '
 </script>
 
 <template>
-  <li>
+  <li class="tree-item">
+    <div
+      class="tree-drop-line tree-drop-line--before"
+      :class="{ active: dropIntent === 'before', available: dragKind === 'node' }"
+      :style="{ marginLeft: `${10 + (depth ?? 0) * 15}px` }"
+      @dragover="handleDragOver($event, 'before')"
+      @dragleave="handleDragLeave($event, 'before')"
+      @drop="handleDrop($event, 'before')"
+    />
     <button
       class="tree-row"
-      :class="{ selected: selectedId === node.id, locked: !node.editable, 'drop-target': dropPosition === 'inside' }"
+      :class="{ selected: selectedId === node.id, locked: !node.editable, 'drop-target': dropIntent === 'inside' || dropIntent === 'append' }"
       :style="{ paddingLeft: `${10 + (depth ?? 0) * 15}px` }"
       :title="node.lockedReason"
       :draggable="node.editable"
       @click="emit('select', node)"
-      @dragstart.stop="emit('dragNode', node)"
+      @dragstart="handleDragStart"
       @dragend="emit('dragEnd')"
-      @dragover="handleDragOver"
-      @dragleave="handleDragLeave"
-      @drop.stop.prevent="handleDrop"
+      @dragover="handleDragOver($event, 'inside')"
+      @dragleave="handleDragLeave($event, 'inside')"
+      @drop="handleDrop($event, 'inside')"
     >
       <span class="tree-kind">{{ node.kind === 'component' ? 'C' : node.kind === 'text' ? 'T' : 'E' }}</span>
       <span class="tree-label">{{ node.kind === 'text' ? `“${node.label}”` : node.label }}</span>
       <span v-if="!node.editable" class="lock-mark">Locked</span>
     </button>
-    <div v-if="dropPosition" class="tree-drop-indicator" :class="`tree-drop-indicator--${dropPosition}`" :style="{ marginLeft: `${10 + (depth ?? 0) * 15}px` }">
-      <span />{{ dragKind === 'component' ? 'Insert' : 'Move' }} {{ dropPosition }} {{ node.label }}
-    </div>
     <ul v-if="node.children.length">
       <TreeNode
         v-for="child in node.children"
@@ -79,11 +106,28 @@ function handleChildDrop(target: DesignerNode, position: 'before' | 'inside' | '
         :selected-id="selectedId"
         :depth="(depth ?? 0) + 1"
         :drag-kind="dragKind"
+        :dragged-node="draggedNode"
         @select="emit('select', $event)"
         @drag-node="emit('dragNode', $event)"
         @drag-end="emit('dragEnd')"
         @drop-node="handleChildDrop"
       />
     </ul>
+    <div
+      class="tree-drop-line tree-drop-line--append"
+      :class="{ active: dropIntent === 'append', available: node.kind !== 'text' && !!dragKind }"
+      :style="{ marginLeft: `${25 + (depth ?? 0) * 15}px` }"
+      @dragover="handleDragOver($event, 'append')"
+      @dragleave="handleDragLeave($event, 'append')"
+      @drop="handleDrop($event, 'append')"
+    />
+    <div
+      class="tree-drop-line tree-drop-line--after"
+      :class="{ active: dropIntent === 'after', available: dragKind === 'node' }"
+      :style="{ marginLeft: `${10 + (depth ?? 0) * 15}px` }"
+      @dragover="handleDragOver($event, 'after')"
+      @dragleave="handleDragLeave($event, 'after')"
+      @drop="handleDrop($event, 'after')"
+    />
   </li>
 </template>

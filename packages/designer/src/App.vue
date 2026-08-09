@@ -117,6 +117,13 @@ function startNodeDrag(node: DesignerNode): void {
   draggedNode.value = node
 }
 
+function startComponentDrag(event: DragEvent, component: DesignerComponentMetadata): void {
+  draggedNode.value = null
+  draggedComponent.value = component
+  event.dataTransfer?.setData('application/x-vue-designer-component', component.name)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
+}
+
 function endTreeDrag(): void {
   draggedComponent.value = null
   draggedNode.value = null
@@ -348,7 +355,7 @@ onUnmounted(() => {
             :disabled="!selectedNode || selectedNode.kind === 'text' || !selectedNode.editable"
             :title="selectedNode ? `Insert into ${selectedNode.label}` : 'Select a container first'"
             draggable="true"
-            @dragstart="draggedNode = null; draggedComponent = component"
+            @dragstart="startComponentDrag($event, component)"
             @dragend="endTreeDrag"
             @click="insertComponent(component)"
           >
@@ -364,6 +371,7 @@ onUnmounted(() => {
             :node="node"
             :selected-id="selectedNodeId"
             :drag-kind="dragKind"
+            :dragged-node="draggedNode"
             @select="selectNode"
             @drag-node="startNodeDrag"
             @drag-end="endTreeDrag"

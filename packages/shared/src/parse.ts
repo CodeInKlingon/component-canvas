@@ -224,6 +224,9 @@ export function applySourceOperation(source: string, operation: DesignerSourceOp
     if (target.range.start >= node.range.start && target.range.end <= node.range.end) {
       throw new Error('A node cannot be moved into its own descendants')
     }
+    if (operation.position === 'inside' && target.children.at(-1)?.id === node.id) {
+      return source
+    }
 
     const remove = removalRange(source, node)
     const insertion = insertionPoint(source, target, operation.position)

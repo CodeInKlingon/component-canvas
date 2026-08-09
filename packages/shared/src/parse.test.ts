@@ -108,6 +108,15 @@ describe('parseDesignerDocument', () => {
     })).toThrow('descendants')
   })
 
+  it('does nothing when appending the current last child to its parent', () => {
+    const source = `<template>\n  <section>\n    <Card name="first" />\n    <Card name="last" />\n  </section>\n</template>`
+    const section = parseDesignerDocument(source).tree[0]!
+    const last = section.children.at(-1)!
+    expect(applySourceOperation(source, {
+      type: 'move-node', nodeId: last.id, targetId: section.id, position: 'inside',
+    })).toBe(source)
+  })
+
   it('represents named slot templates as editable tree containers', () => {
     const source = `<template><Card><template #header><h2>Title</h2></template><p>Body</p></Card></template>`
     const card = parseDesignerDocument(source).tree[0]!
