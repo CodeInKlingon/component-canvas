@@ -147,12 +147,14 @@ export function isVoidElement(tag: string): boolean {
 
 export type PreviewToEditorMessage =
   | { channel: 'vue-designer'; session: string; type: 'ready' }
+  | { channel: 'vue-designer'; session: string; type: 'viewport-state'; scrollX: number; scrollY: number }
   | { channel: 'vue-designer'; session: string; type: 'select'; nodeId: string }
   | { channel: 'vue-designer'; session: string; type: 'computed-style'; nodeId: string; styles: Record<string, string> }
   | { channel: 'vue-designer'; session: string; type: 'diagnostic'; level: 'error' | 'warning' | 'info'; message: string; stack?: string }
 
 export type EditorToPreviewMessage =
   | { channel: 'vue-designer'; session: string; type: 'select'; nodeId: string | null }
+  | { channel: 'vue-designer'; session: string; type: 'restore-viewport'; scrollX: number; scrollY: number }
   | { channel: 'vue-designer'; session: string; type: 'apply-style'; nodeId: string; property: string; value: string | null }
 
 export function isPreviewToEditorMessage(value: unknown): value is PreviewToEditorMessage {
@@ -160,6 +162,8 @@ export function isPreviewToEditorMessage(value: unknown): value is PreviewToEdit
   const message = value as Record<string, unknown>
   if (message.channel !== 'vue-designer' || typeof message.session !== 'string') return false
   if (message.type === 'ready') return true
+  if (message.type === 'viewport-state') return typeof message.scrollX === 'number' && Number.isFinite(message.scrollX)
+    && typeof message.scrollY === 'number' && Number.isFinite(message.scrollY)
   if (message.type === 'diagnostic') {
     return ['error', 'warning', 'info'].includes(String(message.level)) && typeof message.message === 'string'
       && (message.stack === undefined || typeof message.stack === 'string')
@@ -174,6 +178,8 @@ export function isEditorToPreviewMessage(value: unknown): value is EditorToPrevi
   const message = value as Record<string, unknown>
   if (message.channel !== 'vue-designer' || typeof message.session !== 'string') return false
   if (message.type === 'select') return message.nodeId === null || typeof message.nodeId === 'string'
+  if (message.type === 'restore-viewport') return typeof message.scrollX === 'number' && Number.isFinite(message.scrollX)
+    && typeof message.scrollY === 'number' && Number.isFinite(message.scrollY)
   return message.type === 'apply-style' && typeof message.nodeId === 'string'
     && typeof message.property === 'string' && (message.value === null || typeof message.value === 'string')
 }

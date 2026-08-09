@@ -36,6 +36,7 @@ const previewFrame = ref<HTMLIFrameElement | null>(null)
 const previewOrigin = ref('')
 const previewSession = ref(crypto.randomUUID())
 const previewDiagnostic = ref<{ level: 'error' | 'warning' | 'info'; message: string; stack?: string } | null>(null)
+const previewScroll = ref({ x: 0, y: 0 })
 const sourceEditor = ref<InstanceType<typeof SourceEditor> | null>(null)
 const selectedNodeId = ref<string | null>(null)
 const candidateId = ref<string | null>(null)
@@ -249,6 +250,7 @@ async function openDocument(document: DesignerDocumentSummary): Promise<void> {
     candidateId.value = null
     previewSession.value = crypto.randomUUID()
     previewDiagnostic.value = null
+    previewScroll.value = { x: 0, y: 0 }
     previewVersion.value += 1
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Unable to open document'
@@ -551,7 +553,22 @@ function handleExternalChange(change: DesignerDocumentChangedEvent): void {
 function handlePreviewMessage(event: MessageEvent): void {
   if (event.source !== previewFrame.value?.contentWindow || !isPreviewToEditorMessage(event.data)) return
   if (event.data.session !== previewSession.value) return
-  if (event.data.type === 'ready') return
+  if (event.data.type === 'ready') {
+    previewFrame.value?.contentWindow?.postMessage({
+      channel: 'vue-designer',
+      session: previewSession.value,
+      type: 'restore-viewport',
+      scrollX: previewScroll.value.x,
+      scrollY: previewScroll.value.y,
+    }, '*')
+    const node = selectedNode.value
+    if (node && node.kind !== 'text') selectNode(node, false)
+    return
+  }
+  if (event.data.type === 'viewport-state') {
+    previewScroll.value = { x: event.data.scrollX, y: event.data.scrollY }
+    return
+  }
   if (event.data.type === 'diagnostic') {
     previewDiagnostic.value = event.data
     return
@@ -571,8 +588,7 @@ function reloadPreview(): void {
 }
 
 function handlePreviewLoad(): void {
-  const node = selectedNode.value
-  if (node && node.kind !== 'text') selectNode(node, false)
+  // Selection and viewport restoration wait for the preview's ready handshake.
 }
 
 function handleShortcut(event: KeyboardEvent): void {

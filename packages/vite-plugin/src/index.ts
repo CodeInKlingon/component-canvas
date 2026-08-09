@@ -243,6 +243,11 @@ try {
 }
 
 let selected
+let scrollFrame
+addEventListener('scroll', () => {
+  cancelAnimationFrame(scrollFrame)
+  scrollFrame = requestAnimationFrame(() => send({ type: 'viewport-state', scrollX, scrollY }))
+}, { passive: true })
 function select(nodeId) {
   selected?.style.removeProperty('outline')
   selected?.style.removeProperty('outline-offset')
@@ -269,6 +274,9 @@ addEventListener('message', (event) => {
   const message = event.data
   if (message?.channel !== 'vue-designer' || message.session !== session) return
   if (message.type === 'select' && (message.nodeId === null || typeof message.nodeId === 'string')) select(message.nodeId)
+  if (message.type === 'restore-viewport' && Number.isFinite(message.scrollX) && Number.isFinite(message.scrollY)) {
+    requestAnimationFrame(() => scrollTo(message.scrollX, message.scrollY))
+  }
   if (message.type === 'apply-style') {
     if (typeof message.nodeId !== 'string' || typeof message.property !== 'string'
       || (message.value !== null && typeof message.value !== 'string')) return

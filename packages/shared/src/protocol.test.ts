@@ -12,4 +12,10 @@ describe('preview protocol validation', () => {
     expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'diagnostic', level: 'fatal', message: 'Failed' })).toBe(false)
     expect(isEditorToPreviewMessage({ channel: 'vue-designer', session: 'session', type: 'apply-style', nodeId: 'node', property: 'color', value: 3 })).toBe(false)
   })
+
+  it('validates finite viewport coordinates', () => {
+    expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'viewport-state', scrollX: 4, scrollY: 120 })).toBe(true)
+    expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'viewport-state', scrollX: 0, scrollY: Infinity })).toBe(false)
+    expect(isEditorToPreviewMessage({ channel: 'vue-designer', session: 'session', type: 'restore-viewport', scrollX: 4, scrollY: 120 })).toBe(true)
+  })
 })
