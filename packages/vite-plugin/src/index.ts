@@ -10,10 +10,13 @@ import type {
   DesignerDocument,
   DesignerDocumentSummary,
   DesignerComponentMetadata,
+  DesignerStyleCandidateResponse,
+  DesignerStyleOperation,
   PreviewCandidateResponse,
   SaveDocumentRequest,
 } from '@vue-designer/shared'
 import { instrumentDesignerNodes, parseDesignerDocument } from '@vue-designer/shared'
+import { applyStyleOperation, getDesignerStyleRules } from '@vue-designer/shared/style'
 
 export interface VueDesignerOptions {
   documents: string | string[]
@@ -60,6 +63,13 @@ function isCandidateRequest(value: unknown): value is { path: string; source: st
   if (!value || typeof value !== 'object') return false
   const candidate = value as Record<string, unknown>
   return typeof candidate.path === 'string' && typeof candidate.source === 'string'
+}
+
+function isStyleRequest(value: unknown): value is { path: string; source: string; operation: DesignerStyleOperation } {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return typeof candidate.path === 'string' && typeof candidate.source === 'string'
+    && !!candidate.operation && typeof candidate.operation === 'object'
 }
 
 function literalOptions(schema: PropertyMetaSchema): string[] {
@@ -173,6 +183,12 @@ function select(nodeId) {
   selected = nodeId ? document.querySelector('[data-vue-designer-id="' + CSS.escape(nodeId) + '"]') : null
   selected?.style.setProperty('outline', '2px solid #78b82a')
   selected?.style.setProperty('outline-offset', '3px')
+  if (selected) {
+    const computed = getComputedStyle(selected)
+    const properties = ['display', 'width', 'height', 'padding', 'margin', 'gap', 'font-size', 'font-weight', 'text-align', 'color', 'background-color', 'border', 'border-radius']
+    const styles = Object.fromEntries(properties.map((property) => [property, computed.getPropertyValue(property)]))
+    parent.postMessage({ channel: 'vue-designer', type: 'computed-style', nodeId, styles }, '*')
+  }
 }
 document.addEventListener('click', (event) => {
   const target = event.target instanceof Element ? event.target.closest('[data-vue-designer-id]') : null
@@ -180,12 +196,20 @@ document.addEventListener('click', (event) => {
   if (!nodeId) return
   event.preventDefault()
   event.stopPropagation()
-  select(nodeId)
   parent.postMessage({ channel: 'vue-designer', type: 'select', nodeId }, '*')
+  select(nodeId)
 }, true)
 addEventListener('message', (event) => {
   const message = event.data
-  if (message?.channel === 'vue-designer' && message.type === 'select') select(message.nodeId)
+  if (message?.channel !== 'vue-designer') return
+  if (message.type === 'select') select(message.nodeId)
+  if (message.type === 'apply-style') {
+    const target = document.querySelector('[data-vue-designer-id="' + CSS.escape(message.nodeId) + '"]')
+    if (!(target instanceof HTMLElement)) return
+    if (message.value) target.style.setProperty(message.property, message.value)
+    else target.style.removeProperty(message.property)
+    if (message.nodeId === selected?.getAttribute('data-vue-designer-id')) select(message.nodeId)
+  }
 })
 `
     },
@@ -279,6 +303,36 @@ addEventListener('message', (event) => {
               candidateId,
               tree: parsed.tree,
               diagnostics: parsed.diagnostics,
+            }
+            return json(response, 200, result)
+          }
+
+          if (request.method === 'POST' && url.pathname === '/__designer/api/styles') {
+            const body = await readBody(request)
+            if (!body || typeof body !== 'object') return json(response, 400, { error: 'Invalid style request' })
+            const requestBody = body as Record<string, unknown>
+            if (typeof requestBody.path !== 'string' || typeof requestBody.source !== 'string'
+              || typeof requestBody.nodeId !== 'string' || !await resolveDocument(requestBody.path)) {
+              return json(response, 400, { error: 'Invalid style request' })
+            }
+            return json(response, 200, getDesignerStyleRules(requestBody.source, requestBody.nodeId))
+          }
+
+          if (request.method === 'POST' && url.pathname === '/__designer/api/style-candidate') {
+            const body = await readBody(request)
+            if (!isStyleRequest(body) || !await resolveDocument(body.path)) {
+              return json(response, 400, { error: 'Invalid style operation' })
+            }
+            const candidateSource = applyStyleOperation(body.source, body.operation)
+            const parsed = parseDesignerDocument(candidateSource)
+            const candidateId = randomUUID()
+            candidates.set(candidateId, { path: body.path, source: candidateSource })
+            const result: DesignerStyleCandidateResponse = {
+              source: candidateSource,
+              candidateId,
+              tree: parsed.tree,
+              diagnostics: parsed.diagnostics,
+              rules: getDesignerStyleRules(candidateSource, body.operation.nodeId),
             }
             return json(response, 200, result)
           }

@@ -82,6 +82,30 @@ export interface DesignerPropMetadata {
   options?: string[]
 }
 
+export interface DesignerStyleDeclaration {
+  property: string
+  value: string
+  range: DesignerSourceRange
+}
+
+export interface DesignerStyleRule {
+  selector: string
+  declarations: DesignerStyleDeclaration[]
+  insertOffset: number
+}
+
+export interface DesignerStyleOperation {
+  nodeId: string
+  selector: string
+  property: string
+  value: string | null
+}
+
+export interface DesignerStyleCandidateResponse extends PreviewCandidateResponse {
+  source: string
+  rules: DesignerStyleRule[]
+}
+
 export type DesignerSourceOperation =
   | { type: 'set-text'; nodeId: string; value: string }
   | { type: 'set-attribute'; nodeId: string; name: string; value: string | number | boolean | null; binding?: boolean }
@@ -101,24 +125,20 @@ export type DesignerSourceOperation =
       position: 'before' | 'inside' | 'after'
     }
 
-export type PreviewToEditorMessage = {
-  channel: 'vue-designer'
-  type: 'select'
-  nodeId: string
-}
+export type PreviewToEditorMessage =
+  | { channel: 'vue-designer'; type: 'select'; nodeId: string }
+  | { channel: 'vue-designer'; type: 'computed-style'; nodeId: string; styles: Record<string, string> }
 
-export type EditorToPreviewMessage = {
-  channel: 'vue-designer'
-  type: 'select'
-  nodeId: string | null
-}
+export type EditorToPreviewMessage =
+  | { channel: 'vue-designer'; type: 'select'; nodeId: string | null }
+  | { channel: 'vue-designer'; type: 'apply-style'; nodeId: string; property: string; value: string | null }
 
 export function isPreviewToEditorMessage(value: unknown): value is PreviewToEditorMessage {
   if (!value || typeof value !== 'object') return false
   const message = value as Record<string, unknown>
-  return message.channel === 'vue-designer'
-    && message.type === 'select'
-    && typeof message.nodeId === 'string'
+  if (message.channel !== 'vue-designer' || typeof message.nodeId !== 'string') return false
+  if (message.type === 'select') return true
+  return message.type === 'computed-style' && !!message.styles && typeof message.styles === 'object'
 }
 
 export { applySourceOperation, instrumentDesignerNodes, parseDesignerDocument } from './parse.ts'

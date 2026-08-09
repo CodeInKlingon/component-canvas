@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./style": "./src/style.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
@@ -13,7 +14,8 @@
   },
   "dependencies": {
     "@vue/compiler-dom": "^3.5.17",
-    "@vue/compiler-sfc": "^3.5.17"
+    "@vue/compiler-sfc": "^3.5.17",
+    "postcss": "^8.5.6"
   },
   "devDependencies": {
     "typescript": "^5.8.3",

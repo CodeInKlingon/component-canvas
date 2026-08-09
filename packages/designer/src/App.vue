@@ -9,6 +9,8 @@ import type {
   DesignerSourceOperation,
   DesignerComponentMetadata,
   DesignerPropMetadata,
+  DesignerStyleRule,
+  DesignerStyleCandidateResponse,
   PreviewCandidateResponse,
 } from '@vue-designer/shared'
 import { applySourceOperation, isPreviewToEditorMessage, parseDesignerDocument } from '@vue-designer/shared'
@@ -28,7 +30,10 @@ const viewportWidth = ref<'100%' | '768px' | '390px'>('100%')
 const previewFrame = ref<HTMLIFrameElement | null>(null)
 const selectedNodeId = ref<string | null>(null)
 const candidateId = ref<string | null>(null)
-const inspectorView = ref<'content' | 'source'>('content')
+const inspectorView = ref<'content' | 'style' | 'source'>('content')
+const activeStyleSelector = ref('')
+const styleRules = ref<DesignerStyleRule[]>([])
+const computedStyles = ref<Record<string, string>>({})
 const draggedComponent = ref<DesignerComponentMetadata | null>(null)
 const draggedNode = ref<DesignerNode | null>(null)
 let sourcePreviewTimer: number | undefined
@@ -48,6 +53,17 @@ const selectedNode = computed(() => findNode(activeDocument.value?.tree ?? [], s
 const selectedComponent = computed(() => selectedNode.value?.kind === 'component'
   ? components.value.find((component) => component.name === selectedNode.value?.label) ?? null
   : null)
+const activeStyleRule = computed<DesignerStyleRule | null>(() =>
+  styleRules.value.find((rule) => rule.selector === activeStyleSelector.value)
+    ?? styleRules.value[0]
+    ?? null,
+)
+const styleControls = [
+  { group: 'Layout', properties: ['display', 'width', 'height', 'gap'] },
+  { group: 'Spacing', properties: ['padding', 'margin'] },
+  { group: 'Typography', properties: ['font-size', 'font-weight', 'text-align', 'color'] },
+  { group: 'Surface', properties: ['background-color', 'border', 'border-radius'] },
+]
 const dragKind = computed<'component' | 'node' | null>(() => draggedComponent.value ? 'component' : draggedNode.value ? 'node' : null)
 
 const previewUrl = computed(() => {
@@ -139,6 +155,8 @@ function handleTreeDrop(target: DesignerNode, position: 'before' | 'inside' | 'a
   } else if (draggedNode.value) {
     const nodeId = draggedNode.value.id
     selectedNodeId.value = null
+    styleRules.value = []
+    computedStyles.value = {}
     void applyOperation({ type: 'move-node', nodeId, targetId: target.id, position })
   }
   endTreeDrag()
@@ -283,6 +301,68 @@ function isComponentProp(name: string): boolean {
   return selectedComponent.value?.props.some((prop) => prop.name === name) ?? false
 }
 
+function styleSelector(): string {
+  if (activeStyleRule.value) return activeStyleRule.value.selector
+  const classValue = selectedNode.value?.attributes.find((attribute) => attribute.name === 'class' && attribute.kind === 'static')?.value
+  const className = classValue?.split(/\s+/).find(Boolean) ?? `designer-${selectedNode.value?.id ?? 'node'}`
+  return `.${className}`
+}
+
+function styleValue(property: string): string {
+  return activeStyleRule.value?.declarations.find((declaration) => declaration.property === property)?.value ?? ''
+}
+
+function updateStyle(property: string, event: Event): void {
+  const node = selectedNode.value
+  if (!node || node.kind === 'text') return
+  const selector = styleSelector()
+  activeStyleSelector.value = selector
+  const value = (event.target as HTMLInputElement | HTMLSelectElement).value
+  const document = activeDocument.value
+  if (!document) return
+  void api<DesignerStyleCandidateResponse>('/__designer/api/style-candidate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      path: document.path,
+      source: source.value,
+      operation: { nodeId: node.id, selector, property, value: value || null },
+    }),
+  }).then((result) => {
+    source.value = result.source
+    styleRules.value = result.rules
+    activeDocument.value = { ...document, tree: result.tree, diagnostics: result.diagnostics }
+    saveState.value = result.source === document.source ? 'clean' : 'dirty'
+    previewFrame.value?.contentWindow?.postMessage({
+      channel: 'vue-designer',
+      type: 'apply-style',
+      nodeId: node.id,
+      property,
+      value: value || null,
+    }, '*')
+  }).catch((cause) => {
+    error.value = cause instanceof Error ? cause.message : 'Unable to update style'
+  })
+}
+
+async function loadStyles(): Promise<void> {
+  const document = activeDocument.value
+  const node = selectedNode.value
+  if (!document || !node || node.kind === 'text') {
+    styleRules.value = []
+    return
+  }
+  try {
+    styleRules.value = await api<DesignerStyleRule[]>('/__designer/api/styles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: document.path, source: source.value, nodeId: node.id }),
+    })
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : 'Unable to load styles'
+  }
+}
+
 async function save(): Promise<void> {
   const document = activeDocument.value
   if (!document || saveState.value === 'saving' || saveState.value === 'clean') return
@@ -318,6 +398,9 @@ async function reload(): Promise<void> {
 
 function selectNode(node: DesignerNode): void {
   selectedNodeId.value = node.id
+  activeStyleSelector.value = ''
+  computedStyles.value = {}
+  void loadStyles()
   if (node.kind !== 'text') {
     previewFrame.value?.contentWindow?.postMessage({
       channel: 'vue-designer',
@@ -329,7 +412,13 @@ function selectNode(node: DesignerNode): void {
 
 function handlePreviewMessage(event: MessageEvent): void {
   if (event.source !== previewFrame.value?.contentWindow || !isPreviewToEditorMessage(event.data)) return
+  if (event.data.type === 'computed-style') {
+    if (event.data.nodeId === selectedNodeId.value) computedStyles.value = event.data.styles
+    return
+  }
   selectedNodeId.value = event.data.nodeId
+  activeStyleSelector.value = ''
+  void loadStyles()
 }
 
 function handlePreviewLoad(): void {
@@ -451,6 +540,7 @@ onUnmounted(() => {
       <aside class="inspector-panel">
         <div class="inspector-tabs">
           <button :class="{ active: inspectorView === 'content' }" @click="inspectorView = 'content'">Content</button>
+          <button :class="{ active: inspectorView === 'style' }" @click="inspectorView = 'style'">Style</button>
           <button :class="{ active: inspectorView === 'source' }" @click="inspectorView = 'source'">Source</button>
         </div>
 
@@ -521,6 +611,55 @@ onUnmounted(() => {
             </section>
             <div v-if="selectedNode.kind !== 'text' && !selectedNode.attributes.length && !selectedComponent?.props.length" class="inspector-empty compact">No attributes on this layer.</div>
             <div v-if="!selectedNode.editable" class="locked-notice">{{ selectedNode.lockedReason }}</div>
+          </template>
+        </div>
+
+        <div v-else-if="inspectorView === 'style'" class="inspector-content style-inspector">
+          <div v-if="!selectedNode || selectedNode.kind === 'text'" class="inspector-empty">
+            <strong>Select an element</strong>
+            <span>Editable local CSS rules will appear here.</span>
+          </div>
+          <template v-else>
+            <div class="selection-summary">
+              <span class="tree-kind">{{ selectedNode.kind === 'component' ? 'C' : 'E' }}</span>
+              <div><strong>{{ selectedNode.label }}</strong><small>Styles</small></div>
+            </div>
+            <div class="style-rule-picker">
+              <label>Local rule</label>
+              <select
+                v-if="styleRules.length"
+                :value="activeStyleRule?.selector"
+                @change="activeStyleSelector = ($event.target as HTMLSelectElement).value"
+              >
+                <option v-for="rule in styleRules" :key="rule.selector" :value="rule.selector">{{ rule.selector }}</option>
+              </select>
+              <code v-else>{{ styleSelector() }} (new)</code>
+            </div>
+            <section v-for="group in styleControls" :key="group.group" class="inspector-section style-section">
+              <div class="section-title">{{ group.group }}</div>
+              <label v-for="property in group.properties" :key="property">
+                <span>{{ property }}</span>
+                <select v-if="property === 'display'" :value="styleValue(property)" @change="updateStyle(property, $event)">
+                  <option value="">Unset</option>
+                  <option v-for="value in ['block', 'flex', 'grid', 'inline-flex', 'none']" :key="value" :value="value">{{ value }}</option>
+                </select>
+                <select v-else-if="property === 'text-align'" :value="styleValue(property)" @change="updateStyle(property, $event)">
+                  <option value="">Unset</option>
+                  <option v-for="value in ['left', 'center', 'right', 'justify']" :key="value" :value="value">{{ value }}</option>
+                </select>
+                <div v-else-if="property === 'color' || property === 'background-color'" class="color-control">
+                  <input type="color" :value="styleValue(property) || '#000000'" @change="updateStyle(property, $event)" />
+                  <input :value="styleValue(property)" placeholder="Unset" @change="updateStyle(property, $event)" />
+                </div>
+                <input v-else :value="styleValue(property)" placeholder="Unset" @change="updateStyle(property, $event)" />
+              </label>
+            </section>
+            <section v-if="Object.keys(computedStyles).length" class="inspector-section computed-section">
+              <div class="section-title">Computed</div>
+              <div v-for="(value, property) in computedStyles" :key="property" class="computed-row">
+                <span>{{ property }}</span><code>{{ value || 'initial' }}</code>
+              </div>
+            </section>
           </template>
         </div>
 

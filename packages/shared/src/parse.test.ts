@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { applySourceOperation, instrumentDesignerNodes, parseDesignerDocument } from './parse'
+import { applyStyleOperation, getDesignerStyleRules } from './style'
 
 describe('parseDesignerDocument', () => {
   it('builds a tree and locks structural directives', () => {
@@ -135,6 +136,28 @@ describe('parseDesignerDocument', () => {
     expect(card.children[0]).toMatchObject({ label: 'slot:header', editable: true })
     expect(card.children[0]?.attributes[0]).toMatchObject({ name: 'slot', value: 'header', editable: false })
     expect(card.children[0]?.children[0]).toMatchObject({ label: 'h2' })
+  })
+
+  it('reads, updates, adds, and removes local CSS declarations', () => {
+    const source = `<template><main class="page">Content</main></template>\n<style scoped>\n.page {\n  display: flex;\n}\n</style>`
+    const main = parseDesignerDocument(source).tree[0]!
+    expect(getDesignerStyleRules(source, main.id)[0]).toMatchObject({
+      selector: '.page', declarations: [{ property: 'display', value: 'flex' }],
+    })
+    const updated = applyStyleOperation(source, { nodeId: main.id, selector: '.page', property: 'display', value: 'grid' })
+    expect(updated).toContain('display: grid;')
+    const added = applyStyleOperation(updated, { nodeId: main.id, selector: '.page', property: 'gap', value: '12px' })
+    expect(added).toContain('gap: 12px;')
+    expect(applyStyleOperation(added, { nodeId: main.id, selector: '.page', property: 'display', value: null })).not.toContain('display:')
+  })
+
+  it('creates a local class and scoped style block when needed', () => {
+    const source = `<template><section>Content</section></template>`
+    const section = parseDesignerDocument(source).tree[0]!
+    const result = applyStyleOperation(source, { nodeId: section.id, selector: '.designer-node-0', property: 'padding', value: '16px' })
+    expect(result).toContain('class="designer-node-0"')
+    expect(result).toContain('<style scoped>')
+    expect(result).toContain('padding: 16px;')
   })
 
   it('adds ephemeral attributes without changing text content', () => {
