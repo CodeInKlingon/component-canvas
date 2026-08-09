@@ -16,6 +16,7 @@ import type {
 } from '@vue-designer/shared'
 import { applySourceOperation, isPreviewToEditorMessage, parseDesignerDocument } from '@vue-designer/shared'
 import TreeNode from './TreeNode.vue'
+import SourceEditor from './SourceEditor.vue'
 import { SourceHistory } from './history'
 import { findNode, findNodeAtOffset, findNodeAtPath, findNodePath } from './selection'
 
@@ -31,7 +32,7 @@ const saveState = ref<SaveState>('clean')
 const previewVersion = ref(0)
 const viewportWidth = ref<'100%' | '768px' | '390px'>('100%')
 const previewFrame = ref<HTMLIFrameElement | null>(null)
-const sourceEditor = ref<HTMLTextAreaElement | null>(null)
+const sourceEditor = ref<InstanceType<typeof SourceEditor> | null>(null)
 const selectedNodeId = ref<string | null>(null)
 const candidateId = ref<string | null>(null)
 const inspectorView = ref<'content' | 'style' | 'source'>('content')
@@ -197,8 +198,8 @@ async function openDocument(document: DesignerDocumentSummary): Promise<void> {
   }
 }
 
-function updateSource(event: Event): void {
-  source.value = (event.target as HTMLTextAreaElement).value
+function updateSource(value: Event | string): void {
+  source.value = typeof value === 'string' ? value : (value.target as HTMLTextAreaElement).value
   saveState.value = source.value === activeDocument.value?.source ? 'clean' : 'dirty'
   window.clearTimeout(sourcePreviewTimer)
   sourcePreviewTimer = window.setTimeout(() => void createCandidate(source.value), 350)
@@ -469,9 +470,7 @@ function selectNode(node: DesignerNode, revealInSource = true): void {
   }
 }
 
-function syncSelectionFromSource(): void {
-  const offset = sourceEditor.value?.selectionStart
-  if (offset === undefined) return
+function syncSelectionFromSource(offset: number): void {
   const match = findNodeAtOffset(activeDocument.value?.tree ?? [], offset)
   if (match) selectNode(match, false)
 }
@@ -755,18 +754,14 @@ onUnmounted(() => {
           </template>
         </div>
 
-        <textarea
+        <SourceEditor
           v-else
           ref="sourceEditor"
-          class="source-editor"
-          :value="source"
+          :source="source"
           :disabled="!activeDocument"
-          spellcheck="false"
-          aria-label="Vue source"
           @input="updateSource"
           @blur="commitSourceEdit"
-          @click="syncSelectionFromSource"
-          @keyup="syncSelectionFromSource"
+          @cursor="syncSelectionFromSource"
         />
       </aside>
     </main>
