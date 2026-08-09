@@ -61,9 +61,24 @@ export interface PreviewCandidateResponse {
   diagnostics: DesignerDiagnostic[]
 }
 
+export interface DesignerComponentMetadata {
+  name: string
+  label: string
+  category: string
+  source: string
+  defaultContent?: string
+}
+
 export type DesignerSourceOperation =
   | { type: 'set-text'; nodeId: string; value: string }
   | { type: 'set-attribute'; nodeId: string; name: string; value: string }
+  | {
+      type: 'insert-component'
+      parentId: string
+      name: string
+      importSource: string
+      defaultContent?: string
+    }
 
 export type PreviewToEditorMessage = {
   channel: 'vue-designer'

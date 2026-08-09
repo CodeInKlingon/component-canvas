@@ -37,6 +37,41 @@ describe('parseDesignerDocument', () => {
     expect(attribute).toMatchObject({ kind: 'expression', editable: false })
   })
 
+  it('inserts a component and its import into an editable parent', () => {
+    const source = `<script setup>\n</script>\n<template>\n  <main>Existing</main>\n</template>`
+    const main = parseDesignerDocument(source).tree[0]!
+    const result = applySourceOperation(source, {
+      type: 'insert-component',
+      parentId: main.id,
+      name: 'NoticeBadge',
+      importSource: '../components/NoticeBadge.vue',
+      defaultContent: 'New',
+    })
+
+    expect(result).toContain("import NoticeBadge from '../components/NoticeBadge.vue'")
+    expect(result).toContain('    <NoticeBadge>New</NoticeBadge>\n  </main>')
+    expect(parseDesignerDocument(result).diagnostics).toEqual([])
+
+    const insertedAgain = applySourceOperation(result, {
+      type: 'insert-component',
+      parentId: parseDesignerDocument(result).tree[0]!.id,
+      name: 'NoticeBadge',
+      importSource: '../components/NoticeBadge.vue',
+    })
+    expect(insertedAgain.match(/import NoticeBadge/g)).toHaveLength(1)
+  })
+
+  it('rejects insertion into locked structural nodes', () => {
+    const source = `<template><section v-for="item in items">Item</section></template>`
+    const section = parseDesignerDocument(source).tree[0]!
+    expect(() => applySourceOperation(source, {
+      type: 'insert-component',
+      parentId: section.id,
+      name: 'Card',
+      importSource: './Card.vue',
+    })).toThrow('editable elements')
+  })
+
   it('adds ephemeral attributes without changing text content', () => {
     const source = `<template>\n  <main><Card>Hello</Card></main>\n</template>`
     expect(instrumentDesignerNodes(source)).toContain('<main data-vue-designer-id="node-0">')

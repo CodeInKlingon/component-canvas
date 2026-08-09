@@ -158,8 +158,38 @@ function escapeAttribute(value: string): string {
 export function applySourceOperation(source: string, operation: DesignerSourceOperation): string {
   const parsed = parseDesignerDocument(source)
   if (parsed.diagnostics.some((item) => item.severity === 'error')) throw new Error('Cannot edit an invalid document')
-  const node = findNode(parsed.tree, operation.nodeId)
+  const targetId = operation.type === 'insert-component' ? operation.parentId : operation.nodeId
+  const node = findNode(parsed.tree, targetId)
   if (!node) throw new Error('Selected node no longer exists')
+
+  if (operation.type === 'insert-component') {
+    if (node.kind === 'text' || !node.editable) throw new Error('Components can only be inserted into editable elements')
+    const closingTagStart = source.lastIndexOf('</', node.range.end)
+    if (closingTagStart < node.range.start) throw new Error('The selected element cannot contain children')
+
+    let insertionStart = closingTagStart
+    while (insertionStart > node.range.start && /\s/.test(source[insertionStart - 1] ?? '')) insertionStart--
+
+    const lineStart = source.lastIndexOf('\n', node.range.start) + 1
+    const parentIndent = source.slice(lineStart, node.range.start).match(/^\s*/)?.[0] ?? ''
+    const childIndent = `${parentIndent}  `
+    const content = operation.defaultContent ?? operation.name
+    let result = `${source.slice(0, insertionStart)}\n${childIndent}<${operation.name}>${escapeText(content)}</${operation.name}>\n${parentIndent}${source.slice(closingTagStart)}`
+
+    const sfc = parseSfc(result, { sourceMap: false }).descriptor
+    const importPattern = new RegExp(`\\bimport\\s+${operation.name}\\b`)
+    if (!importPattern.test(sfc.scriptSetup?.content ?? '')) {
+      const importStatement = `import ${operation.name} from '${operation.importSource}'\n`
+      if (sfc.scriptSetup) {
+        const insertAt = sfc.scriptSetup.loc.start.offset + sfc.scriptSetup.content.length
+        result = `${result.slice(0, insertAt)}${importStatement}${result.slice(insertAt)}`
+      } else {
+        const templateStart = result.indexOf('<template')
+        result = `${result.slice(0, templateStart)}<script setup>\n${importStatement}</script>\n\n${result.slice(templateStart)}`
+      }
+    }
+    return result
+  }
 
   if (operation.type === 'set-text') {
     if (node.kind !== 'text') throw new Error('The selected node is not text')

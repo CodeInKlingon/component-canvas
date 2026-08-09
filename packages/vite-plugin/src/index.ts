@@ -8,6 +8,7 @@ import type { Plugin, ResolvedConfig } from 'vite'
 import type {
   DesignerDocument,
   DesignerDocumentSummary,
+  DesignerComponentMetadata,
   PreviewCandidateResponse,
   SaveDocumentRequest,
 } from '@vue-designer/shared'
@@ -190,6 +191,27 @@ addEventListener('message', (event) => {
         try {
           if (request.method === 'GET' && url.pathname === '/__designer/api/documents') {
             return json(response, 200, await discoverDocuments())
+          }
+
+          if (request.method === 'GET' && url.pathname === '/__designer/api/components') {
+            if (!options.components) return json(response, 200, [])
+            const registryPath = path.resolve(config.root, options.components)
+            const module = await server.ssrLoadModule(registryPath)
+            const registry = module.default as Record<string, Record<string, unknown>>
+            const components: DesignerComponentMetadata[] = Object.entries(registry).map(([name, entry]) => {
+              if (typeof entry.source !== 'string') {
+                throw new Error(`Component ${name} must define a source module`)
+              }
+              const absoluteSource = path.resolve(path.dirname(registryPath), entry.source)
+              return {
+                name,
+                label: typeof entry.label === 'string' ? entry.label : name,
+                category: typeof entry.category === 'string' ? entry.category : 'Components',
+                source: path.relative(config.root, absoluteSource).replaceAll('\\', '/'),
+                defaultContent: typeof entry.defaultContent === 'string' ? entry.defaultContent : undefined,
+              }
+            })
+            return json(response, 200, components)
           }
 
           if (request.method === 'POST' && url.pathname === '/__designer/api/candidate') {

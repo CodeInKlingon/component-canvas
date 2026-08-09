@@ -7,6 +7,7 @@ import type {
   SaveDocumentResponse,
   DesignerNode,
   DesignerSourceOperation,
+  DesignerComponentMetadata,
   PreviewCandidateResponse,
 } from '@vue-designer/shared'
 import { applySourceOperation, isPreviewToEditorMessage, parseDesignerDocument } from '@vue-designer/shared'
@@ -15,6 +16,7 @@ import TreeNode from './TreeNode.vue'
 type SaveState = 'clean' | 'dirty' | 'saving' | 'conflict'
 
 const documents = ref<DesignerDocumentSummary[]>([])
+const components = ref<DesignerComponentMetadata[]>([])
 const activeDocument = ref<DesignerDocument | null>(null)
 const source = ref('')
 const error = ref('')
@@ -26,6 +28,7 @@ const previewFrame = ref<HTMLIFrameElement | null>(null)
 const selectedNodeId = ref<string | null>(null)
 const candidateId = ref<string | null>(null)
 const inspectorView = ref<'content' | 'source'>('content')
+const draggedComponent = ref<DesignerComponentMetadata | null>(null)
 let sourcePreviewTimer: number | undefined
 let candidateRequest = 0
 
@@ -69,13 +72,47 @@ async function loadDocuments(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    documents.value = await api('/__designer/api/documents')
+    const [loadedDocuments, loadedComponents] = await Promise.all([
+      api<DesignerDocumentSummary[]>('/__designer/api/documents'),
+      api<DesignerComponentMetadata[]>('/__designer/api/components'),
+    ])
+    documents.value = loadedDocuments
+    components.value = loadedComponents
     if (documents.value[0]) await openDocument(documents.value[0])
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Unable to load documents'
   } finally {
     loading.value = false
   }
+}
+
+function relativeImport(documentPath: string, componentPath: string): string {
+  const from = documentPath.split('/').slice(0, -1)
+  const to = componentPath.split('/')
+  while (from[0] && from[0] === to[0]) {
+    from.shift()
+    to.shift()
+  }
+  const relative = `${from.map(() => '..').join('/')}${from.length && to.length ? '/' : ''}${to.join('/')}`
+  return relative.startsWith('.') ? relative : `./${relative}`
+}
+
+function insertComponent(component: DesignerComponentMetadata, target = selectedNode.value): void {
+  const document = activeDocument.value
+  const parent = target
+  if (!document || !parent || parent.kind === 'text' || !parent.editable) return
+  void applyOperation({
+    type: 'insert-component',
+    parentId: parent.id,
+    name: component.name,
+    importSource: relativeImport(document.path, component.source),
+    defaultContent: component.defaultContent,
+  })
+}
+
+function insertDraggedComponent(target: DesignerNode): void {
+  if (draggedComponent.value) insertComponent(draggedComponent.value, target)
+  draggedComponent.value = null
 }
 
 async function openDocument(document: DesignerDocumentSummary): Promise<void> {
@@ -273,6 +310,22 @@ onUnmounted(() => {
           <span><strong>{{ document.name }}</strong><small>{{ document.path }}</small></span>
         </button>
         <div v-if="!loading && documents.length === 0" class="empty-state">No Vue documents match the configured pattern.</div>
+        <div class="layers-heading">Components</div>
+        <div class="component-palette">
+          <button
+            v-for="component in components"
+            :key="component.name"
+            :disabled="!selectedNode || selectedNode.kind === 'text' || !selectedNode.editable"
+            :title="selectedNode ? `Insert into ${selectedNode.label}` : 'Select a container first'"
+            draggable="true"
+            @dragstart="draggedComponent = component"
+            @dragend="draggedComponent = null"
+            @click="insertComponent(component)"
+          >
+            <span class="component-glyph">+</span>
+            <span><strong>{{ component.label }}</strong><small>{{ component.category }}</small></span>
+          </button>
+        </div>
         <div v-if="activeDocument" class="layers-heading">Layers</div>
         <ul v-if="activeDocument" class="tree-list">
           <TreeNode
@@ -281,6 +334,7 @@ onUnmounted(() => {
             :node="node"
             :selected-id="selectedNodeId"
             @select="selectNode"
+            @insert="insertDraggedComponent"
           />
         </ul>
         <div v-if="activeDocument?.diagnostics.length" class="tree-diagnostic">

@@ -1,6 +1,8 @@
 # 03: Component Palette And Insertion
 
-**Status:** Planned
+**Status:** Complete
+
+**Completed:** 2026-08-08
 
 ## User Outcome
 
@@ -27,3 +29,13 @@ A user browses their configured component library and inserts a component into a
 
 - Registry serialization and import mutation tests.
 - Browser test inserting an `AppButton` and saving it.
+
+## Completion Notes
+
+- The configured registry is loaded through the host Vite pipeline and serialized without component implementations.
+- Registry entries explicitly identify their source module for deterministic import generation.
+- The left palette displays component labels and categories.
+- Components can be inserted by clicking after selecting a container or by dragging onto a tree container.
+- New imports are generated relative to the document; existing imports are reused.
+- Locked and text targets reject insertion.
+- Browser verification inserted an unimported `NoticeBadge`, rendered it in transient preview, and showed it in the tree and generated source.
