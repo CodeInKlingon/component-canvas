@@ -1,6 +1,8 @@
 # 05: Props Inspector
 
-**Status:** Planned
+**Status:** Complete
+
+**Completed:** 2026-08-09
 
 ## User Outcome
 
@@ -30,3 +32,14 @@ A user selects a component and configures its props using appropriate controls s
 
 - Metadata normalization and prop-source operation tests.
 - Browser test changing the example button tone.
+
+## Completion Notes
+
+- `vue-component-meta` reads each registered component through the host project's `tsconfig.json`.
+- The plugin serializes inferred props, defaults, required state, descriptions, events, and slots without exposing TypeScript objects to the browser.
+- Literal string unions infer select controls; boolean and number props infer checkbox and number controls.
+- Registry control and option overrides take precedence over inference; the example verifies a string prop overridden to a color control.
+- The right inspector adds missing props, updates static or literal-bound props, and resets optional props by removing their source attribute.
+- Arbitrary expression props remain visible and disabled.
+- Browser verification changed and reset the inferred `AppButton.tone` select and inspected inferred number and boolean controls for `NoticeBadge`.
+- The registry API reports `tone:select`, `count:number`, `subtle:checkbox`, and overridden `accent:color`.

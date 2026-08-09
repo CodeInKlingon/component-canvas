@@ -112,6 +112,13 @@ button { color: inherit; }
 .inspector-section textarea { min-height: 90px; resize: vertical; }
 .inspector-section input:focus, .inspector-section textarea:focus { border-color: #789d50; box-shadow: 0 0 0 2px #789d5022; }
 .inspector-section input:disabled { color: #716c63; background: #191a17; }
+.prop-control { display: flex; align-items: center; gap: 6px; }
+.prop-control > input:not([type="checkbox"]), .prop-control select { flex: 1; min-width: 0; border: 1px solid #343a33; border-radius: 6px; outline: 0; background: #141714; color: #d0d7ce; padding: 8px 9px; font: 10px/1.5 'DM Mono', monospace; }
+.prop-control input[type="checkbox"] { width: 16px; height: 16px; margin: 3px 0; accent-color: #9ed653; }
+.prop-control input[type="color"] { min-height: 34px; padding: 3px; }
+.prop-control button { border: 0; background: none; color: #747c73; padding: 5px 2px; font-size: 8px; cursor: pointer; }
+.prop-control button:hover { color: #b7f36b; }
+.expression-note { color: #9a765d; font-size: 8px; font-weight: 400; }
 .locked-notice { margin: 14px; padding: 10px; border: 1px solid #544534; border-radius: 6px; color: #b59a75; font-size: 9px; line-height: 1.5; }
 .source-editor { width: 100%; height: 100%; resize: none; border: 0; outline: 0; padding: 17px; background: #141714; color: #cfd7cc; caret-color: #b7f36b; font: 12px/1.7 'DM Mono', monospace; tab-size: 2; }
 .source-editor::selection { background: #435932; }

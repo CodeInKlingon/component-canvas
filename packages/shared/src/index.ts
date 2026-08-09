@@ -67,11 +67,24 @@ export interface DesignerComponentMetadata {
   category: string
   source: string
   defaultContent?: string
+  props: DesignerPropMetadata[]
+  events: Array<{ name: string; description: string }>
+  slots: Array<{ name: string; description: string }>
+}
+
+export interface DesignerPropMetadata {
+  name: string
+  type: string
+  description: string
+  required: boolean
+  default?: string
+  control: 'text' | 'number' | 'checkbox' | 'select' | 'color'
+  options?: string[]
 }
 
 export type DesignerSourceOperation =
   | { type: 'set-text'; nodeId: string; value: string }
-  | { type: 'set-attribute'; nodeId: string; name: string; value: string }
+  | { type: 'set-attribute'; nodeId: string; name: string; value: string | number | boolean | null; binding?: boolean }
   | {
       type: 'insert-component'
       parentId: string

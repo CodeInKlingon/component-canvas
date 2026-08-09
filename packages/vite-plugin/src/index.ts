@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fg from 'fast-glob'
+import { createChecker, type ComponentMetaChecker, type PropertyMetaSchema } from 'vue-component-meta'
 import type { Plugin, ResolvedConfig } from 'vite'
 import type {
   DesignerDocument,
@@ -61,12 +62,35 @@ function isCandidateRequest(value: unknown): value is { path: string; source: st
   return typeof candidate.path === 'string' && typeof candidate.source === 'string'
 }
 
+function literalOptions(schema: PropertyMetaSchema): string[] {
+  if (typeof schema === 'string') return []
+  if (schema.kind === 'literal') return [schema.value.replace(/^(['"])(.*)\1$/, '$2')]
+  if (schema.kind === 'enum') {
+    return (schema.schema ?? []).flatMap((value) => typeof value === 'string'
+      ? [value.replace(/^(['"])(.*)\1$/, '$2')]
+      : literalOptions(value))
+  }
+  return []
+}
+
+function inferControl(type: string, schema: PropertyMetaSchema): {
+  control: 'text' | 'number' | 'checkbox' | 'select'
+  options?: string[]
+} {
+  const options = literalOptions(schema).filter((value) => value !== 'undefined')
+  if (/(^|\W)boolean(\W|$)/.test(type)) return { control: 'checkbox' }
+  if (/(^|\W)number(\W|$)/.test(type)) return { control: 'number' }
+  if (options.length > 1) return { control: 'select', options }
+  return { control: 'text' }
+}
+
 export default function vueDesigner(options: VueDesignerOptions): Plugin {
   let config: ResolvedConfig
   let documentFiles = new Map<string, string>()
   const previewEntryPrefix = '\0vue-designer:preview-entry?'
   const candidateMarker = '?vue-designer-candidate='
   const candidates = new Map<string, { path: string; source: string }>()
+  let componentChecker: ComponentMetaChecker | undefined
 
   async function discoverDocuments(): Promise<DesignerDocumentSummary[]> {
     const patterns = Array.isArray(options.documents)
@@ -203,12 +227,37 @@ addEventListener('message', (event) => {
                 throw new Error(`Component ${name} must define a source module`)
               }
               const absoluteSource = path.resolve(path.dirname(registryPath), entry.source)
+              componentChecker ??= createChecker(path.resolve(config.root, 'tsconfig.json'), { schema: true })
+              const inferred = componentChecker.getComponentMeta(absoluteSource)
+              const overrides = entry.props && typeof entry.props === 'object'
+                ? entry.props as Record<string, Record<string, unknown>>
+                : {}
               return {
                 name,
                 label: typeof entry.label === 'string' ? entry.label : name,
                 category: typeof entry.category === 'string' ? entry.category : 'Components',
                 source: path.relative(config.root, absoluteSource).replaceAll('\\', '/'),
                 defaultContent: typeof entry.defaultContent === 'string' ? entry.defaultContent : undefined,
+                props: inferred.props.filter((prop) => !prop.global).map((prop) => {
+                  const inferredControl = inferControl(prop.type, prop.schema)
+                  const override = overrides[prop.name] ?? {}
+                  const control = ['text', 'number', 'checkbox', 'select', 'color'].includes(String(override.control))
+                    ? override.control as DesignerComponentMetadata['props'][number]['control']
+                    : inferredControl.control
+                  return {
+                    name: prop.name,
+                    type: prop.type,
+                    description: prop.description,
+                    required: prop.required,
+                    default: prop.default,
+                    control,
+                    options: Array.isArray(override.options)
+                      ? override.options.filter((value): value is string => typeof value === 'string')
+                      : inferredControl.options,
+                  }
+                }),
+                events: inferred.events.map((event) => ({ name: event.name, description: event.description })),
+                slots: inferred.slots.map((slot) => ({ name: slot.name, description: slot.description })),
               }
             })
             return json(response, 200, components)

@@ -37,6 +37,18 @@ describe('parseDesignerDocument', () => {
     expect(attribute).toMatchObject({ kind: 'expression', editable: false })
   })
 
+  it('adds and removes inferred prop attributes', () => {
+    const source = `<template><Counter /></template>`
+    const counter = parseDesignerDocument(source).tree[0]!
+    const added = applySourceOperation(source, {
+      type: 'set-attribute', nodeId: counter.id, name: 'count', value: 3, binding: true,
+    })
+    expect(added).toContain('<Counter :count="3" />')
+    expect(applySourceOperation(added, {
+      type: 'set-attribute', nodeId: counter.id, name: 'count', value: null,
+    })).toBe(source)
+  })
+
   it('inserts a component and its import into an editable parent', () => {
     const source = `<script setup>\n</script>\n<template>\n  <main>Existing</main>\n</template>`
     const main = parseDesignerDocument(source).tree[0]!

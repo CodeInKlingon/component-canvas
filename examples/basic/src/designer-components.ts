@@ -8,9 +8,6 @@ export default {
     source: './components/AppButton.vue',
     label: 'Button',
     category: 'Actions',
-    props: {
-      tone: { control: 'select', options: ['lime', 'dark'] },
-    },
   },
   FeatureCard: {
     component: FeatureCard,
@@ -24,5 +21,8 @@ export default {
     label: 'Notice badge',
     category: 'Content',
     defaultContent: 'New',
+    props: {
+      accent: { control: 'color' },
+    },
   },
 }

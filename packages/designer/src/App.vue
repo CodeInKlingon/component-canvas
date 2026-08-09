@@ -8,6 +8,7 @@ import type {
   DesignerNode,
   DesignerSourceOperation,
   DesignerComponentMetadata,
+  DesignerPropMetadata,
   PreviewCandidateResponse,
 } from '@vue-designer/shared'
 import { applySourceOperation, isPreviewToEditorMessage, parseDesignerDocument } from '@vue-designer/shared'
@@ -44,6 +45,9 @@ function findNode(nodes: DesignerNode[], id: string | null): DesignerNode | null
 }
 
 const selectedNode = computed(() => findNode(activeDocument.value?.tree ?? [], selectedNodeId.value))
+const selectedComponent = computed(() => selectedNode.value?.kind === 'component'
+  ? components.value.find((component) => component.name === selectedNode.value?.label) ?? null
+  : null)
 const dragKind = computed<'component' | 'node' | null>(() => draggedComponent.value ? 'component' : draggedNode.value ? 'node' : null)
 
 const previewUrl = computed(() => {
@@ -236,6 +240,49 @@ function updateSelectedAttribute(name: string, event: Event): void {
   })
 }
 
+function selectedAttribute(name: string) {
+  return selectedNode.value?.attributes.find((attribute) => attribute.name === name)
+}
+
+function propValue(prop: DesignerPropMetadata): string {
+  const value = selectedAttribute(prop.name)?.value ?? prop.default ?? ''
+  return value.replace(/^(['"])(.*)\1$/, '$2')
+}
+
+function propChecked(prop: DesignerPropMetadata): boolean {
+  return propValue(prop) === 'true'
+}
+
+function propIsExpression(prop: DesignerPropMetadata): boolean {
+  return selectedAttribute(prop.name)?.kind === 'expression'
+}
+
+function updateComponentProp(prop: DesignerPropMetadata, event: Event): void {
+  const node = selectedNode.value
+  if (!node) return
+  const target = event.target as HTMLInputElement | HTMLSelectElement
+  let value: string | number | boolean | null = target.value
+  if (prop.control === 'checkbox') value = (target as HTMLInputElement).checked
+  if (prop.control === 'number') value = target.value === '' ? null : Number(target.value)
+  if (prop.control === 'select' && target.value === '' && !prop.required) value = null
+  void applyOperation({
+    type: 'set-attribute',
+    nodeId: node.id,
+    name: prop.name,
+    value,
+    binding: prop.control === 'checkbox' || prop.control === 'number',
+  })
+}
+
+function clearComponentProp(prop: DesignerPropMetadata): void {
+  const node = selectedNode.value
+  if (node) void applyOperation({ type: 'set-attribute', nodeId: node.id, name: prop.name, value: null })
+}
+
+function isComponentProp(name: string): boolean {
+  return selectedComponent.value?.props.some((prop) => prop.name === name) ?? false
+}
+
 async function save(): Promise<void> {
   const document = activeDocument.value
   if (!document || saveState.value === 'saving' || saveState.value === 'clean') return
@@ -425,9 +472,45 @@ onUnmounted(() => {
               <label for="selected-text">Text content</label>
               <textarea id="selected-text" :value="selectedNode.value" @input="updateSelectedText" />
             </section>
-            <section v-if="selectedNode.attributes.length" class="inspector-section">
+            <section v-if="selectedComponent?.props.length" class="inspector-section props-section">
+              <div class="section-title">Props</div>
+              <label v-for="prop in selectedComponent.props" :key="prop.name" :title="prop.description || prop.type">
+                <span>
+                  {{ prop.name }}
+                  <small>{{ prop.required ? 'Required' : prop.type }}</small>
+                </span>
+                <div class="prop-control">
+                  <input
+                    v-if="prop.control === 'checkbox'"
+                    type="checkbox"
+                    :checked="propChecked(prop)"
+                    :disabled="propIsExpression(prop)"
+                    @change="updateComponentProp(prop, $event)"
+                  />
+                  <select
+                    v-else-if="prop.control === 'select'"
+                    :value="propValue(prop)"
+                    :disabled="propIsExpression(prop)"
+                    @change="updateComponentProp(prop, $event)"
+                  >
+                    <option v-if="!prop.required" value="">Default</option>
+                    <option v-for="option in prop.options" :key="option" :value="option">{{ option }}</option>
+                  </select>
+                  <input
+                    v-else
+                    :type="prop.control === 'number' ? 'number' : prop.control === 'color' ? 'color' : 'text'"
+                    :value="propValue(prop)"
+                    :disabled="propIsExpression(prop)"
+                    @change="updateComponentProp(prop, $event)"
+                  />
+                  <button v-if="selectedAttribute(prop.name) && !prop.required" title="Use default value" @click="clearComponentProp(prop)">Reset</button>
+                </div>
+                <small v-if="propIsExpression(prop)" class="expression-note">Expression props are source-only.</small>
+              </label>
+            </section>
+            <section v-if="selectedNode.attributes.some((attribute) => !isComponentProp(attribute.name))" class="inspector-section">
               <div class="section-title">Attributes</div>
-              <label v-for="attribute in selectedNode.attributes" :key="attribute.name">
+              <label v-for="attribute in selectedNode.attributes.filter((item) => !isComponentProp(item.name))" :key="attribute.name">
                 <span>{{ attribute.name }}<small v-if="!attribute.editable">Expression</small></span>
                 <input
                   :value="attribute.value"
@@ -436,7 +519,7 @@ onUnmounted(() => {
                 />
               </label>
             </section>
-            <div v-if="selectedNode.kind !== 'text' && !selectedNode.attributes.length" class="inspector-empty compact">No attributes on this layer.</div>
+            <div v-if="selectedNode.kind !== 'text' && !selectedNode.attributes.length && !selectedComponent?.props.length" class="inspector-empty compact">No attributes on this layer.</div>
             <div v-if="!selectedNode.editable" class="locked-notice">{{ selectedNode.lockedReason }}</div>
           </template>
         </div>

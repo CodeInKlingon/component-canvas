@@ -279,9 +279,24 @@ export function applySourceOperation(source: string, operation: DesignerSourceOp
   }
 
   const attribute = node.attributes.find((item) => item.name === operation.name)
-  if (!attribute || !attribute.editable) throw new Error('The selected attribute is not editable')
-  const replacement = attribute.kind === 'static'
-    ? `${attribute.name}="${escapeAttribute(operation.value)}"`
-    : `:${attribute.name}="${escapeAttribute(operation.value)}"`
+  if (attribute && !attribute.editable) throw new Error('The selected attribute is not editable')
+  if (operation.value === null) {
+    if (!attribute) return source
+    let start = attribute.range.start
+    if (/\s/.test(source[start - 1] ?? '')) start--
+    return `${source.slice(0, start)}${source.slice(attribute.range.end)}`
+  }
+
+  const binding = operation.binding || attribute?.kind === 'literal-binding'
+  const serialized = typeof operation.value === 'string'
+    ? operation.value
+    : JSON.stringify(operation.value)
+  const replacement = binding
+    ? `:${operation.name}="${escapeAttribute(serialized)}"`
+    : `${operation.name}="${escapeAttribute(serialized)}"`
+  if (!attribute) {
+    const insertAt = node.range.start + 1 + node.label.length
+    return `${source.slice(0, insertAt)} ${replacement}${source.slice(insertAt)}`
+  }
   return `${source.slice(0, attribute.range.start)}${replacement}${source.slice(attribute.range.end)}`
 }
