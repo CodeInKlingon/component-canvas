@@ -1,6 +1,6 @@
 # 07: History, Source, And File Sync
 
-**Status:** Planned
+**Status:** In progress
 
 ## User Outcome
 
@@ -9,7 +9,7 @@ A user moves freely between visual and source editing, can undo either kind of c
 ## Scope
 
 - Source-transaction undo and redo.
-- Replace the textarea with the Shiki-backed source view defined in ticket 07a.
+- Keep source editing functional; syntax highlighting is deferred to ticket 07a.
 - Source cursor and visual selection synchronization.
 - External file watching and revision notifications.
 - Conflict reload and explicit overwrite/merge choices.

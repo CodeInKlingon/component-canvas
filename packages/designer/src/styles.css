@@ -29,6 +29,11 @@ button { color: inherit; }
 .viewport-switcher button, .panel-heading button { background: none; border: 0; color: #777f77; font-size: 10px; padding: 5px 7px; cursor: pointer; }
 .viewport-switcher button.active { color: #dce2db; background: #2a3029; border-radius: 4px; }
 .save-state { color: #777f77; font-size: 10px; min-width: 85px; text-align: right; }
+.history-actions { display: flex; overflow: hidden; border: 1px solid #343a33; border-radius: 7px; background: #171a17; }
+.history-actions button { border: 0; border-right: 1px solid #343a33; background: transparent; color: #aeb4ad; font-size: 10px; padding: 7px 9px; cursor: pointer; }
+.history-actions button:last-child { border-right: 0; }
+.history-actions button:hover:not(:disabled) { background: #2a3029; color: #dce2db; }
+.history-actions button:disabled { color: #555d55; cursor: default; }
 .save-button { border: 0; border-radius: 7px; background: #b7f36b; color: #15200e; font-size: 11px; font-weight: 700; padding: 8px 15px; cursor: pointer; }
 .save-button:disabled { background: #343a33; color: #757c74; cursor: default; }
 

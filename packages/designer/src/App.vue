@@ -11,10 +11,12 @@ import type {
   DesignerPropMetadata,
   DesignerStyleRule,
   DesignerStyleCandidateResponse,
+  DesignerDocumentChangedEvent,
   PreviewCandidateResponse,
 } from '@vue-designer/shared'
 import { applySourceOperation, isPreviewToEditorMessage, parseDesignerDocument } from '@vue-designer/shared'
 import TreeNode from './TreeNode.vue'
+import { SourceHistory } from './history'
 
 type SaveState = 'clean' | 'dirty' | 'saving' | 'conflict'
 
@@ -28,6 +30,7 @@ const saveState = ref<SaveState>('clean')
 const previewVersion = ref(0)
 const viewportWidth = ref<'100%' | '768px' | '390px'>('100%')
 const previewFrame = ref<HTMLIFrameElement | null>(null)
+const sourceEditor = ref<HTMLTextAreaElement | null>(null)
 const selectedNodeId = ref<string | null>(null)
 const candidateId = ref<string | null>(null)
 const inspectorView = ref<'content' | 'style' | 'source'>('content')
@@ -36,6 +39,9 @@ const styleRules = ref<DesignerStyleRule[]>([])
 const computedStyles = ref<Record<string, string>>({})
 const draggedComponent = ref<DesignerComponentMetadata | null>(null)
 const draggedNode = ref<DesignerNode | null>(null)
+const externalRevision = ref<string | null>(null)
+const historyVersion = ref(0)
+const history = new SourceHistory()
 let sourcePreviewTimer: number | undefined
 let candidateRequest = 0
 
@@ -65,6 +71,13 @@ const styleControls = [
   { group: 'Surface', properties: ['background-color', 'border', 'border-radius'] },
 ]
 const dragKind = computed<'component' | 'node' | null>(() => draggedComponent.value ? 'component' : draggedNode.value ? 'node' : null)
+const canUndo = computed(() => (historyVersion.value, history.canUndo))
+const canRedo = computed(() => (historyVersion.value, history.canRedo))
+
+function recordSource(candidateSource: string): void {
+  history.push(candidateSource)
+  historyVersion.value += 1
+}
 
 const previewUrl = computed(() => {
   if (!activeDocument.value) return ''
@@ -181,7 +194,10 @@ async function openDocument(document: DesignerDocumentSummary): Promise<void> {
     const loaded = await api<DesignerDocument>(`/__designer/api/document?path=${encodeURIComponent(document.path)}`)
     activeDocument.value = loaded
     source.value = loaded.source
+    history.reset(loaded.source)
+    historyVersion.value += 1
     saveState.value = 'clean'
+    externalRevision.value = null
     selectedNodeId.value = null
     candidateId.value = null
     previewVersion.value += 1
@@ -195,6 +211,10 @@ function updateSource(event: Event): void {
   saveState.value = source.value === activeDocument.value?.source ? 'clean' : 'dirty'
   window.clearTimeout(sourcePreviewTimer)
   sourcePreviewTimer = window.setTimeout(() => void createCandidate(source.value), 350)
+}
+
+function commitSourceEdit(): void {
+  recordSource(source.value)
 }
 
 async function createCandidate(candidateSource: string): Promise<void> {
@@ -219,6 +239,7 @@ async function createCandidate(candidateSource: string): Promise<void> {
     if (request !== candidateRequest || source.value !== candidateSource) return
     candidateId.value = result.candidateId
     activeDocument.value = { ...document, tree: result.tree, diagnostics: result.diagnostics }
+    if (selectedNodeId.value && !findNode(result.tree, selectedNodeId.value)) selectedNodeId.value = null
     error.value = ''
   } catch (cause) {
     if (request !== candidateRequest) return
@@ -229,6 +250,7 @@ async function createCandidate(candidateSource: string): Promise<void> {
 async function applyOperation(operation: DesignerSourceOperation): Promise<void> {
   try {
     const candidateSource = applySourceOperation(source.value, operation)
+    recordSource(candidateSource)
     source.value = candidateSource
     saveState.value = candidateSource === activeDocument.value?.source ? 'clean' : 'dirty'
     await createCandidate(candidateSource)
@@ -329,7 +351,9 @@ function updateStyle(property: string, event: Event): void {
       operation: { nodeId: node.id, selector, property, value: value || null },
     }),
   }).then((result) => {
+    recordSource(result.source)
     source.value = result.source
+    candidateId.value = result.candidateId
     styleRules.value = result.rules
     activeDocument.value = { ...document, tree: result.tree, diagnostics: result.diagnostics }
     saveState.value = result.source === document.source ? 'clean' : 'dirty'
@@ -380,6 +404,7 @@ async function save(): Promise<void> {
     )
     activeDocument.value = { ...document, source: source.value, revision: result.revision }
     candidateId.value = null
+    externalRevision.value = null
     saveState.value = 'clean'
     previewVersion.value += 1
   } catch (cause) {
@@ -396,6 +421,33 @@ async function reload(): Promise<void> {
   }
 }
 
+async function keepLocalChanges(): Promise<void> {
+  const document = activeDocument.value
+  if (!document || !externalRevision.value) return
+  activeDocument.value = { ...document, revision: externalRevision.value }
+  externalRevision.value = null
+  saveState.value = 'dirty'
+  error.value = ''
+  await save()
+}
+
+async function restoreHistory(nextSource: string | undefined): Promise<void> {
+  if (nextSource === undefined) return
+  source.value = nextSource
+  historyVersion.value += 1
+  saveState.value = nextSource === activeDocument.value?.source ? 'clean' : 'dirty'
+  await createCandidate(nextSource)
+}
+
+function undo(): void {
+  if (source.value !== history.current) recordSource(source.value)
+  void restoreHistory(history.undo())
+}
+
+function redo(): void {
+  void restoreHistory(history.redo())
+}
+
 function selectNode(node: DesignerNode): void {
   selectedNodeId.value = node.id
   activeStyleSelector.value = ''
@@ -408,6 +460,40 @@ function selectNode(node: DesignerNode): void {
       nodeId: node.id,
     }, '*')
   }
+  if (inspectorView.value === 'source') {
+    requestAnimationFrame(() => {
+      sourceEditor.value?.focus()
+      sourceEditor.value?.setSelectionRange(node.range.start, node.range.end)
+    })
+  }
+}
+
+function syncSelectionFromSource(): void {
+  const offset = sourceEditor.value?.selectionStart
+  if (offset === undefined) return
+  let match: DesignerNode | null = null
+  const visit = (nodes: DesignerNode[]) => {
+    for (const node of nodes) {
+      if (node.range.start <= offset && offset <= node.range.end) {
+        match = node
+        visit(node.children)
+      }
+    }
+  }
+  visit(activeDocument.value?.tree ?? [])
+  if (match) selectNode(match)
+}
+
+function handleExternalChange(change: DesignerDocumentChangedEvent): void {
+  const document = activeDocument.value
+  if (!document || change.path !== document.path || change.revision === document.revision || saveState.value === 'saving') return
+  externalRevision.value = change.revision
+  if (saveState.value === 'clean') {
+    void reload()
+    return
+  }
+  saveState.value = 'conflict'
+  error.value = 'This document changed on disk while you have unsaved changes.'
 }
 
 function handlePreviewMessage(event: MessageEvent): void {
@@ -430,8 +516,17 @@ function handleShortcut(event: KeyboardEvent): void {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
     event.preventDefault()
     void save()
+  } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+    event.preventDefault()
+    if (event.shiftKey) redo()
+    else undo()
+  } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') {
+    event.preventDefault()
+    redo()
   }
 }
+
+import.meta.hot?.on('vue-designer:document-changed', handleExternalChange)
 
 onMounted(() => {
   window.addEventListener('keydown', handleShortcut)
@@ -443,6 +538,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleShortcut)
   window.removeEventListener('message', handlePreviewMessage)
   window.clearTimeout(sourcePreviewTimer)
+  import.meta.hot?.off('vue-designer:document-changed', handleExternalChange)
 })
 </script>
 
@@ -464,6 +560,10 @@ onUnmounted(() => {
           <button :class="{ active: viewportWidth === '390px' }" @click="viewportWidth = '390px'">Mobile</button>
         </div>
         <span class="save-state">{{ stateLabel }}</span>
+        <div class="history-actions" aria-label="Document history">
+          <button :disabled="!canUndo" title="Undo (Ctrl+Z)" @click="undo">Undo</button>
+          <button :disabled="!canRedo" title="Redo (Ctrl+Y)" @click="redo">Redo</button>
+        </div>
         <button class="save-button" :disabled="saveState === 'clean' || saveState === 'saving'" @click="save">Save</button>
       </div>
     </header>
@@ -665,12 +765,16 @@ onUnmounted(() => {
 
         <textarea
           v-else
+          ref="sourceEditor"
           class="source-editor"
           :value="source"
           :disabled="!activeDocument"
           spellcheck="false"
           aria-label="Vue source"
           @input="updateSource"
+          @blur="commitSourceEdit"
+          @click="syncSelectionFromSource"
+          @keyup="syncSelectionFromSource"
         />
       </aside>
     </main>
@@ -678,6 +782,7 @@ onUnmounted(() => {
     <div v-if="error" class="diagnostic">
       <span>{{ error }}</span>
       <button v-if="saveState === 'conflict'" @click="reload">Reload from disk</button>
+      <button v-if="saveState === 'conflict' && externalRevision" @click="keepLocalChanges">Overwrite disk</button>
       <button @click="error = ''">Dismiss</button>
     </div>
   </div>

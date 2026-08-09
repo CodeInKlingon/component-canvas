@@ -12,6 +12,7 @@ import type {
   DesignerComponentMetadata,
   DesignerStyleCandidateResponse,
   DesignerStyleOperation,
+  DesignerDocumentChangedEvent,
   PreviewCandidateResponse,
   SaveDocumentRequest,
 } from '@vue-designer/shared'
@@ -226,6 +227,18 @@ addEventListener('message', (event) => {
       config = resolvedConfig
     },
     configureServer(server) {
+      server.watcher.on('change', async (changedPath) => {
+        const absoluteChangedPath = path.resolve(changedPath)
+        const entry = [...documentFiles].find(([, absolutePath]) => path.resolve(absolutePath) === absoluteChangedPath)
+        if (!entry) return
+        try {
+          const source = await fs.readFile(entry[1], 'utf8')
+          const data: DesignerDocumentChangedEvent = { path: entry[0], revision: revision(source) }
+          server.ws.send({ type: 'custom', event: 'vue-designer:document-changed', data })
+        } catch {
+          // The normal Vite watcher handles removals and transient rename events.
+        }
+      })
       server.middlewares.use(async (request, response, next) => {
         if (!request.url) return next()
         const url = new URL(request.url, 'http://designer.local')

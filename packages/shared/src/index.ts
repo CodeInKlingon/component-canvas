@@ -51,6 +51,11 @@ export interface SaveDocumentRequest {
   revision: string
 }
 
+export interface DesignerDocumentChangedEvent {
+  path: string
+  revision: string
+}
+
 export interface SaveDocumentResponse {
   revision: string
 }

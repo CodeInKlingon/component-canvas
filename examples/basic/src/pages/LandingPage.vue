@@ -8,7 +8,7 @@ import FeatureCard from '../components/FeatureCard.vue'
     <nav>
       <strong>Fieldnote</strong>
       <span>Product&nbsp;&nbsp;&nbsp; Stories&nbsp;&nbsp;&nbsp; About</span>
-      <AppButton tone="dark">Start a project</AppButton>
+      <AppButton tone="lime">Start a project</AppButton>
     </nav>
 
     <section class="hero">
