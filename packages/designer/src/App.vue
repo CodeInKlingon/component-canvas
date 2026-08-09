@@ -29,6 +29,7 @@ const selectedNodeId = ref<string | null>(null)
 const candidateId = ref<string | null>(null)
 const inspectorView = ref<'content' | 'source'>('content')
 const draggedComponent = ref<DesignerComponentMetadata | null>(null)
+const draggedNode = ref<DesignerNode | null>(null)
 let sourcePreviewTimer: number | undefined
 let candidateRequest = 0
 
@@ -43,6 +44,7 @@ function findNode(nodes: DesignerNode[], id: string | null): DesignerNode | null
 }
 
 const selectedNode = computed(() => findNode(activeDocument.value?.tree ?? [], selectedNodeId.value))
+const dragKind = computed<'component' | 'node' | null>(() => draggedComponent.value ? 'component' : draggedNode.value ? 'node' : null)
 
 const previewUrl = computed(() => {
   if (!activeDocument.value) return ''
@@ -110,9 +112,37 @@ function insertComponent(component: DesignerComponentMetadata, target = selected
   })
 }
 
-function insertDraggedComponent(target: DesignerNode): void {
-  if (draggedComponent.value) insertComponent(draggedComponent.value, target)
+function startNodeDrag(node: DesignerNode): void {
   draggedComponent.value = null
+  draggedNode.value = node
+}
+
+function endTreeDrag(): void {
+  draggedComponent.value = null
+  draggedNode.value = null
+}
+
+function handleTreeDrop(target: DesignerNode, position: 'before' | 'inside' | 'after'): void {
+  if (draggedComponent.value) {
+    insertComponent(draggedComponent.value, target)
+  } else if (draggedNode.value) {
+    const nodeId = draggedNode.value.id
+    selectedNodeId.value = null
+    void applyOperation({ type: 'move-node', nodeId, targetId: target.id, position })
+  }
+  endTreeDrag()
+}
+
+function duplicateSelectedNode(): void {
+  const node = selectedNode.value
+  if (node?.editable) void applyOperation({ type: 'duplicate-node', nodeId: node.id })
+}
+
+function removeSelectedNode(): void {
+  const node = selectedNode.value
+  if (!node?.editable || !window.confirm(`Delete ${node.label}?`)) return
+  selectedNodeId.value = null
+  void applyOperation({ type: 'remove-node', nodeId: node.id })
 }
 
 async function openDocument(document: DesignerDocumentSummary): Promise<void> {
@@ -318,8 +348,8 @@ onUnmounted(() => {
             :disabled="!selectedNode || selectedNode.kind === 'text' || !selectedNode.editable"
             :title="selectedNode ? `Insert into ${selectedNode.label}` : 'Select a container first'"
             draggable="true"
-            @dragstart="draggedComponent = component"
-            @dragend="draggedComponent = null"
+            @dragstart="draggedNode = null; draggedComponent = component"
+            @dragend="endTreeDrag"
             @click="insertComponent(component)"
           >
             <span class="component-glyph">+</span>
@@ -333,8 +363,11 @@ onUnmounted(() => {
             :key="node.id"
             :node="node"
             :selected-id="selectedNodeId"
+            :drag-kind="dragKind"
             @select="selectNode"
-            @insert="insertDraggedComponent"
+            @drag-node="startNodeDrag"
+            @drag-end="endTreeDrag"
+            @drop-node="handleTreeDrop"
           />
         </ul>
         <div v-if="activeDocument?.diagnostics.length" class="tree-diagnostic">
@@ -375,6 +408,10 @@ onUnmounted(() => {
             <div class="selection-summary">
               <span class="tree-kind">{{ selectedNode.kind === 'component' ? 'C' : selectedNode.kind === 'text' ? 'T' : 'E' }}</span>
               <div><strong>{{ selectedNode.label }}</strong><small>{{ selectedNode.kind }}</small></div>
+              <div class="selection-actions">
+                <button :disabled="!selectedNode.editable" title="Duplicate layer" @click="duplicateSelectedNode">Duplicate</button>
+                <button :disabled="!selectedNode.editable" title="Delete layer" @click="removeSelectedNode">Delete</button>
+              </div>
             </div>
             <section v-if="selectedNode.kind === 'text'" class="inspector-section">
               <label for="selected-text">Text content</label>

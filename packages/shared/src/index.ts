@@ -79,6 +79,14 @@ export type DesignerSourceOperation =
       importSource: string
       defaultContent?: string
     }
+  | { type: 'remove-node'; nodeId: string }
+  | { type: 'duplicate-node'; nodeId: string }
+  | {
+      type: 'move-node'
+      nodeId: string
+      targetId: string
+      position: 'before' | 'inside' | 'after'
+    }
 
 export type PreviewToEditorMessage = {
   channel: 'vue-designer'

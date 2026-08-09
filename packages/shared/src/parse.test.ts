@@ -62,14 +62,58 @@ describe('parseDesignerDocument', () => {
   })
 
   it('rejects insertion into locked structural nodes', () => {
-    const source = `<template><section v-for="item in items">Item</section></template>`
+    const source = `<template><section v-for="item in items"><span>Item</span></section></template>`
     const section = parseDesignerDocument(source).tree[0]!
+    expect(section.children[0]).toMatchObject({ editable: false })
     expect(() => applySourceOperation(source, {
       type: 'insert-component',
       parentId: section.id,
       name: 'Card',
       importSource: './Card.vue',
     })).toThrow('editable elements')
+  })
+
+  it('duplicates, moves, and removes sibling elements', () => {
+    const source = `<template>\n  <main>\n    <section>A</section>\n    <section>B</section>\n  </main>\n</template>`
+    const sections = parseDesignerDocument(source).tree[0]!.children
+    const duplicated = applySourceOperation(source, { type: 'duplicate-node', nodeId: sections[0]!.id })
+    expect(duplicated.match(/<section>A<\/section>/g)).toHaveLength(2)
+
+    const moved = applySourceOperation(source, {
+      type: 'move-node',
+      nodeId: sections[1]!.id,
+      targetId: sections[0]!.id,
+      position: 'before',
+    })
+    expect(moved.indexOf('<section>B')).toBeLessThan(moved.indexOf('<section>A'))
+    expect(parseDesignerDocument(moved).diagnostics).toEqual([])
+
+    const removed = applySourceOperation(source, { type: 'remove-node', nodeId: sections[0]!.id })
+    expect(removed).not.toContain('<section>A</section>')
+    expect(removed).toContain('<section>B</section>')
+  })
+
+  it('moves nodes inside containers and rejects descendant cycles', () => {
+    const source = `<template>\n  <main>\n    <aside><span>Child</span></aside>\n    <section>Move me</section>\n  </main>\n</template>`
+    const main = parseDesignerDocument(source).tree[0]!
+    const aside = main.children[0]!
+    const section = main.children[1]!
+    const moved = applySourceOperation(source, {
+      type: 'move-node', nodeId: section.id, targetId: aside.id, position: 'inside',
+    })
+    expect(moved).toContain('<aside><span>Child</span>\n      <section>Move me</section>')
+    expect(moved).not.toMatch(/<section>Move me<\/section>\n\s*\n/)
+    expect(() => applySourceOperation(source, {
+      type: 'move-node', nodeId: aside.id, targetId: aside.children[0]!.id, position: 'inside',
+    })).toThrow('descendants')
+  })
+
+  it('represents named slot templates as editable tree containers', () => {
+    const source = `<template><Card><template #header><h2>Title</h2></template><p>Body</p></Card></template>`
+    const card = parseDesignerDocument(source).tree[0]!
+    expect(card.children[0]).toMatchObject({ label: 'slot:header', editable: true })
+    expect(card.children[0]?.attributes[0]).toMatchObject({ name: 'slot', value: 'header', editable: false })
+    expect(card.children[0]?.children[0]).toMatchObject({ label: 'h2' })
   })
 
   it('adds ephemeral attributes without changing text content', () => {

@@ -17,7 +17,7 @@ function meaningfulText(content: string): string {
   return content.replace(/\s+/g, ' ').trim()
 }
 
-function convertChildren(children: TemplateChildNode[], state: ParseState): DesignerNode[] {
+function convertChildren(children: TemplateChildNode[], state: ParseState, ancestorLock?: string): DesignerNode[] {
   const result: DesignerNode[] = []
 
   for (const child of children) {
@@ -33,7 +33,8 @@ function convertChildren(children: TemplateChildNode[], state: ParseState): Desi
           start: state.templateOffset + child.loc.start.offset,
           end: state.templateOffset + child.loc.end.offset,
         },
-        editable: true,
+        editable: !ancestorLock,
+        lockedReason: ancestorLock,
         attributes: [],
         children: [],
       })
@@ -46,8 +47,12 @@ function convertChildren(children: TemplateChildNode[], state: ParseState): Desi
     const structuralDirective = child.props.find((prop) =>
       prop.type === NodeTypes.DIRECTIVE && ['for', 'if', 'else-if', 'else'].includes(prop.name),
     )
-    const lockedReason = structuralDirective
+    const lockedReason = ancestorLock ?? (structuralDirective
       ? `Structural directive v-${structuralDirective.name} is not visually editable yet`
+      : undefined)
+    const slotDirective = child.props.find((prop) => prop.type === NodeTypes.DIRECTIVE && prop.name === 'slot')
+    const slotName = slotDirective?.type === NodeTypes.DIRECTIVE && slotDirective.arg?.type === NodeTypes.SIMPLE_EXPRESSION
+      ? slotDirective.arg.content
       : undefined
     const attributes: DesignerAttribute[] = child.props.map((prop) => {
       const range = {
@@ -59,19 +64,20 @@ function convertChildren(children: TemplateChildNode[], state: ParseState): Desi
           name: prop.name,
           value: prop.value?.content ?? '',
           kind: 'static' as const,
-          editable: true,
+          editable: !lockedReason,
           range,
         }
       }
 
-      const name = prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION ? prop.arg.content : `v-${prop.name}`
+      const argument = prop.arg?.type === NodeTypes.SIMPLE_EXPRESSION ? prop.arg.content : undefined
+      const name = prop.name === 'slot' ? 'slot' : argument ?? `v-${prop.name}`
       const value = prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION ? prop.exp.content : ''
       const literal = prop.name === 'bind' && /^(?:true|false|null|-?\d+(?:\.\d+)?|'[^']*'|"[^"]*")$/.test(value)
       return {
         name,
-        value,
+        value: prop.name === 'slot' ? argument ?? 'default' : value,
         kind: literal ? 'literal-binding' as const : 'expression' as const,
-        editable: literal,
+        editable: literal && !lockedReason,
         range,
       }
     })
@@ -83,7 +89,7 @@ function convertChildren(children: TemplateChildNode[], state: ParseState): Desi
     result.push({
       id,
       kind: child.tagType === 1 ? 'component' : 'element',
-      label: child.tag,
+      label: slotName ? `slot:${slotName}` : child.tag,
       range: {
         start: state.templateOffset + child.loc.start.offset,
         end: state.templateOffset + child.loc.end.offset,
@@ -91,7 +97,7 @@ function convertChildren(children: TemplateChildNode[], state: ParseState): Desi
       editable: !lockedReason,
       lockedReason,
       attributes,
-      children: convertChildren(child.children, state),
+      children: convertChildren(child.children, state, lockedReason),
     })
   }
 
@@ -147,6 +153,40 @@ function findNode(nodes: DesignerNode[], nodeId: string): DesignerNode | undefin
   }
 }
 
+function lineIndent(source: string, offset: number): string {
+  const start = source.lastIndexOf('\n', offset - 1) + 1
+  return source.slice(start, offset).match(/^\s*/)?.[0] ?? ''
+}
+
+function removalRange(source: string, node: DesignerNode): { start: number; end: number } {
+  const lineStart = source.lastIndexOf('\n', node.range.start - 1) + 1
+  const prefix = source.slice(lineStart, node.range.start)
+  let start = /^\s*$/.test(prefix) ? lineStart : node.range.start
+  let end = node.range.end
+  const lineEnd = source.indexOf('\n', end)
+  if (lineEnd >= 0 && /^\s*$/.test(source.slice(end, lineEnd))) end = lineEnd + 1
+  if (start === 0 && end < source.length && source[end] === '\n') end++
+  return { start, end }
+}
+
+function insertionPoint(source: string, target: DesignerNode, position: 'before' | 'inside' | 'after') {
+  if (position === 'before') {
+    const offset = removalRange(source, target).start
+    return { offset, replaceEnd: offset, indent: lineIndent(source, target.range.start) }
+  }
+  if (position === 'after') {
+    const offset = removalRange(source, target).end
+    return { offset, replaceEnd: offset, indent: lineIndent(source, target.range.start) }
+  }
+
+  if (target.kind === 'text') throw new Error('Text nodes cannot contain children')
+  const closingTagStart = source.lastIndexOf('</', target.range.end)
+  if (closingTagStart < target.range.start) throw new Error('The target cannot contain children')
+  let offset = closingTagStart
+  while (offset > target.range.start && /\s/.test(source[offset - 1] ?? '')) offset--
+  return { offset, replaceEnd: closingTagStart, indent: `${lineIndent(source, target.range.start)}  `, closingIndent: lineIndent(source, target.range.start) }
+}
+
 function escapeText(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 }
@@ -161,6 +201,45 @@ export function applySourceOperation(source: string, operation: DesignerSourceOp
   const targetId = operation.type === 'insert-component' ? operation.parentId : operation.nodeId
   const node = findNode(parsed.tree, targetId)
   if (!node) throw new Error('Selected node no longer exists')
+
+  if (operation.type === 'remove-node') {
+    if (!node.editable) throw new Error('Locked nodes cannot be removed')
+    const range = removalRange(source, node)
+    return `${source.slice(0, range.start)}${source.slice(range.end)}`
+  }
+
+  if (operation.type === 'duplicate-node') {
+    if (!node.editable) throw new Error('Locked nodes cannot be duplicated')
+    const range = removalRange(source, node)
+    const snippet = source.slice(node.range.start, node.range.end)
+    const indent = lineIndent(source, node.range.start)
+    return `${source.slice(0, range.end)}${indent}${snippet}\n${source.slice(range.end)}`
+  }
+
+  if (operation.type === 'move-node') {
+    const target = findNode(parsed.tree, operation.targetId)
+    if (!target) throw new Error('Drop target no longer exists')
+    if (!node.editable || !target.editable) throw new Error('Locked nodes cannot be moved')
+    if (node.id === target.id) throw new Error('A node cannot be moved onto itself')
+    if (target.range.start >= node.range.start && target.range.end <= node.range.end) {
+      throw new Error('A node cannot be moved into its own descendants')
+    }
+
+    const remove = removalRange(source, node)
+    const insertion = insertionPoint(source, target, operation.position)
+    const snippet = source.slice(node.range.start, node.range.end)
+    let withoutNode = `${source.slice(0, remove.start)}${source.slice(remove.end)}`
+    let offset = insertion.offset
+    let afterOffset = insertion.replaceEnd
+    if (offset > remove.end) offset -= remove.end - remove.start
+    if (afterOffset > remove.end) afterOffset -= remove.end - remove.start
+    const before = withoutNode.slice(0, offset)
+    const after = withoutNode.slice(afterOffset)
+    const separator = operation.position === 'inside'
+      ? `\n${insertion.indent}${snippet}\n${insertion.closingIndent ?? ''}`
+      : `${insertion.indent}${snippet}\n`
+    return `${before}${separator}${after}`
+  }
 
   if (operation.type === 'insert-component') {
     if (node.kind === 'text' || !node.editable) throw new Error('Components can only be inserted into editable elements')
