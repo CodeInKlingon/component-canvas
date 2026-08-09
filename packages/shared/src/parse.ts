@@ -13,6 +13,8 @@ interface ParseState {
   insertions: Array<{ offset: number; text: string }>
 }
 
+const voidTags = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'])
+
 function meaningfulText(content: string): string {
   return content.replace(/\s+/g, ' ').trim()
 }
@@ -180,11 +182,17 @@ function insertionPoint(source: string, target: DesignerNode, position: 'before'
   }
 
   if (target.kind === 'text') throw new Error('Text nodes cannot contain children')
-  const closingTagStart = source.lastIndexOf('</', target.range.end)
+  if (target.kind === 'element' && voidTags.has(target.label)) throw new Error('The target cannot contain children')
+  const closingTagStart = closingTagOffset(source, target)
   if (closingTagStart < target.range.start) throw new Error('The target cannot contain children')
   let offset = closingTagStart
   while (offset > target.range.start && /\s/.test(source[offset - 1] ?? '')) offset--
   return { offset, replaceEnd: closingTagStart, indent: `${lineIndent(source, target.range.start)}  `, closingIndent: lineIndent(source, target.range.start) }
+}
+
+function closingTagOffset(source: string, node: DesignerNode): number {
+  const tag = source.slice(node.range.start, node.range.end).match(/^<([^\s/>]+)/)?.[1]
+  return tag ? source.lastIndexOf(`</${tag}`, node.range.end) : -1
 }
 
 function escapeText(value: string): string {
@@ -198,7 +206,9 @@ function escapeAttribute(value: string): string {
 export function applySourceOperation(source: string, operation: DesignerSourceOperation): string {
   const parsed = parseDesignerDocument(source)
   if (parsed.diagnostics.some((item) => item.severity === 'error')) throw new Error('Cannot edit an invalid document')
-  const targetId = operation.type === 'insert-component' ? operation.parentId : operation.nodeId
+  const targetId = operation.type === 'insert-component' || operation.type === 'insert-native'
+    ? operation.parentId
+    : operation.nodeId
   const node = findNode(parsed.tree, targetId)
   if (!node) throw new Error('Selected node no longer exists')
 
@@ -246,7 +256,8 @@ export function applySourceOperation(source: string, operation: DesignerSourceOp
 
   if (operation.type === 'insert-component') {
     if (node.kind === 'text' || !node.editable) throw new Error('Components can only be inserted into editable elements')
-    const closingTagStart = source.lastIndexOf('</', node.range.end)
+    if (node.kind === 'element' && voidTags.has(node.label)) throw new Error('The selected element cannot contain children')
+    const closingTagStart = closingTagOffset(source, node)
     if (closingTagStart < node.range.start) throw new Error('The selected element cannot contain children')
 
     let insertionStart = closingTagStart
@@ -270,6 +281,40 @@ export function applySourceOperation(source: string, operation: DesignerSourceOp
         result = `${result.slice(0, templateStart)}<script setup>\n${importStatement}</script>\n\n${result.slice(templateStart)}`
       }
     }
+    return result
+  }
+
+  if (operation.type === 'insert-native') {
+    if (node.kind === 'text' || !node.editable) throw new Error('Native elements can only be inserted into editable elements')
+    if (node.kind === 'element' && voidTags.has(node.label)) throw new Error('The selected element cannot contain children')
+    if (!/^[a-z][a-z0-9-]*$/.test(operation.tag)) throw new Error('Invalid native element tag')
+    const closingTagStart = closingTagOffset(source, node)
+    if (closingTagStart < node.range.start) throw new Error('The selected element cannot contain children')
+
+    if ((operation.contentModel === 'void') !== voidTags.has(operation.tag)) {
+      throw new Error('Native element content model does not match its tag')
+    }
+
+    const attributes = Object.entries(operation.attributes ?? {}).map(([name, value]) => {
+      if (!/^[a-zA-Z_:][\w:.-]*$/.test(name)) throw new Error('Invalid native element attribute')
+      if (typeof value === 'string') return ` ${name}="${escapeAttribute(value)}"`
+      return ` :${name}="${escapeAttribute(JSON.stringify(value))}"`
+    }).join('')
+    const children = operation.defaultChildren
+      ?? (operation.defaultContent === undefined ? '' : escapeText(operation.defaultContent))
+    if (operation.contentModel === 'void' && children) throw new Error('Void elements cannot have children')
+    const markup = operation.contentModel === 'void'
+      ? `<${operation.tag}${attributes}>`
+      : `<${operation.tag}${attributes}>${children}</${operation.tag}>`
+
+    let insertionStart = closingTagStart
+    while (insertionStart > node.range.start && /\s/.test(source[insertionStart - 1] ?? '')) insertionStart--
+    const parentIndent = lineIndent(source, node.range.start)
+    const childIndent = `${parentIndent}  `
+    const result = `${source.slice(0, insertionStart)}\n${childIndent}${markup}\n${parentIndent}${source.slice(closingTagStart)}`
+    const reparsed = parseDesignerDocument(result)
+    const parseError = reparsed.diagnostics.find((item) => item.severity === 'error')
+    if (parseError) throw new Error(parseError.message)
     return result
   }
 

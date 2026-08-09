@@ -121,6 +121,15 @@ export type DesignerSourceOperation =
       importSource: string
       defaultContent?: string
     }
+  | {
+      type: 'insert-native'
+      parentId: string
+      tag: string
+      contentModel: 'normal' | 'text' | 'void'
+      defaultContent?: string
+      defaultChildren?: string
+      attributes?: Record<string, string | number | boolean>
+    }
   | { type: 'remove-node'; nodeId: string }
   | { type: 'duplicate-node'; nodeId: string }
   | {
@@ -129,6 +138,12 @@ export type DesignerSourceOperation =
       targetId: string
       position: 'before' | 'inside' | 'after'
     }
+
+const voidElements = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'])
+
+export function isVoidElement(tag: string): boolean {
+  return voidElements.has(tag.toLowerCase())
+}
 
 export type PreviewToEditorMessage =
   | { channel: 'vue-designer'; session: string; type: 'ready' }

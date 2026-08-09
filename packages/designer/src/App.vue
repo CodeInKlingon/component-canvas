@@ -14,11 +14,12 @@ import type {
   DesignerDocumentChangedEvent,
   PreviewCandidateResponse,
 } from '@vue-designer/shared'
-import { applySourceOperation, isPreviewToEditorMessage, parseDesignerDocument } from '@vue-designer/shared'
+import { applySourceOperation, isPreviewToEditorMessage, isVoidElement, parseDesignerDocument } from '@vue-designer/shared'
 import TreeNode from './TreeNode.vue'
 import SourceEditor from './SourceEditor.vue'
 import { SourceHistory } from './history'
 import { findNode, findNodeAtOffset, findNodeAtPath, findNodePath } from './selection'
+import { nativeElements, type NativeElementMetadata } from './native-elements'
 
 type SaveState = 'clean' | 'dirty' | 'saving' | 'conflict'
 
@@ -43,6 +44,7 @@ const activeStyleSelector = ref('')
 const styleRules = ref<DesignerStyleRule[]>([])
 const computedStyles = ref<Record<string, string>>({})
 const draggedComponent = ref<DesignerComponentMetadata | null>(null)
+const draggedNative = ref<NativeElementMetadata | null>(null)
 const draggedNode = ref<DesignerNode | null>(null)
 const externalRevision = ref<string | null>(null)
 const historyVersion = ref(0)
@@ -55,6 +57,10 @@ const selectedNode = computed(() => findNode(activeDocument.value?.tree ?? [], s
 const selectedComponent = computed(() => selectedNode.value?.kind === 'component'
   ? components.value.find((component) => component.name === selectedNode.value?.label) ?? null
   : null)
+const selectedNative = computed(() => selectedNode.value?.kind === 'element'
+  ? nativeElements.find((element) => element.tag === selectedNode.value?.label) ?? null
+  : null)
+const selectedMetadataProps = computed(() => selectedComponent.value?.props ?? selectedNative.value?.props ?? [])
 const activeStyleRule = computed<DesignerStyleRule | null>(() =>
   styleRules.value.find((rule) => rule.selector === activeStyleSelector.value)
     ?? styleRules.value[0]
@@ -66,7 +72,7 @@ const styleControls = [
   { group: 'Typography', properties: ['font-size', 'font-weight', 'text-align', 'color'] },
   { group: 'Surface', properties: ['background-color', 'border', 'border-radius'] },
 ]
-const dragKind = computed<'component' | 'node' | null>(() => draggedComponent.value ? 'component' : draggedNode.value ? 'node' : null)
+const dragKind = computed<'component' | 'node' | null>(() => draggedComponent.value || draggedNative.value ? 'component' : draggedNode.value ? 'node' : null)
 const canUndo = computed(() => (historyVersion.value, history.canUndo))
 const canRedo = computed(() => (historyVersion.value, history.canRedo))
 
@@ -156,26 +162,56 @@ function insertComponent(component: DesignerComponentMetadata, target = selected
   })
 }
 
+function canContainChildren(node: DesignerNode | null): boolean {
+  return !!node && node.kind !== 'text' && !(node.kind === 'element' && isVoidElement(node.label)) && node.editable
+}
+
+function insertNative(element: NativeElementMetadata, target = selectedNode.value): void {
+  if (!canContainChildren(target)) return
+  void applyOperation({
+    type: 'insert-native',
+    parentId: target!.id,
+    tag: element.tag,
+    contentModel: element.contentModel,
+    defaultContent: element.defaultContent,
+    defaultChildren: element.defaultChildren,
+    attributes: element.attributes,
+  })
+}
+
 function startNodeDrag(node: DesignerNode): void {
   draggedComponent.value = null
+  draggedNative.value = null
   draggedNode.value = node
 }
 
 function startComponentDrag(event: DragEvent, component: DesignerComponentMetadata): void {
   draggedNode.value = null
+  draggedNative.value = null
   draggedComponent.value = component
   event.dataTransfer?.setData('application/x-vue-designer-component', component.name)
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
 }
 
+function startNativeDrag(event: DragEvent, element: NativeElementMetadata): void {
+  draggedNode.value = null
+  draggedComponent.value = null
+  draggedNative.value = element
+  event.dataTransfer?.setData('application/x-vue-designer-native', element.tag)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
+}
+
 function endTreeDrag(): void {
   draggedComponent.value = null
+  draggedNative.value = null
   draggedNode.value = null
 }
 
 function handleTreeDrop(target: DesignerNode, position: 'before' | 'inside' | 'after'): void {
   if (draggedComponent.value) {
     insertComponent(draggedComponent.value, target)
+  } else if (draggedNative.value) {
+    insertNative(draggedNative.value, target)
   } else if (draggedNode.value) {
     const nodeId = draggedNode.value.id
     selectedNodeId.value = null
@@ -339,8 +375,8 @@ function clearComponentProp(prop: DesignerPropMetadata): void {
   if (node) void applyOperation({ type: 'set-attribute', nodeId: node.id, name: prop.name, value: null })
 }
 
-function isComponentProp(name: string): boolean {
-  return selectedComponent.value?.props.some((prop) => prop.name === name) ?? false
+function isMetadataProp(name: string): boolean {
+  return selectedMetadataProps.value.some((prop) => prop.name === name)
 }
 
 function styleSelector(): string {
@@ -615,7 +651,7 @@ onUnmounted(() => {
           <button
             v-for="component in components"
             :key="component.name"
-            :disabled="!selectedNode || selectedNode.kind === 'text' || !selectedNode.editable"
+            :disabled="!canContainChildren(selectedNode)"
             :title="selectedNode ? `Insert into ${selectedNode.label}` : 'Select a container first'"
             draggable="true"
             @dragstart="startComponentDrag($event, component)"
@@ -624,6 +660,22 @@ onUnmounted(() => {
           >
             <span class="component-glyph">+</span>
             <span><strong>{{ component.label }}</strong><small>{{ component.category }}</small></span>
+          </button>
+        </div>
+        <div class="layers-heading">Native</div>
+        <div class="component-palette native-palette">
+          <button
+            v-for="element in nativeElements"
+            :key="element.tag"
+            :disabled="!canContainChildren(selectedNode)"
+            :title="selectedNode ? `Insert into ${selectedNode.label}` : 'Select a container first'"
+            draggable="true"
+            @dragstart="startNativeDrag($event, element)"
+            @dragend="endTreeDrag"
+            @click="insertNative(element)"
+          >
+            <span class="component-glyph">&lt;&gt;</span>
+            <span><strong>{{ element.label }}</strong><small>{{ element.category }}</small></span>
           </button>
         </div>
         <div v-if="activeDocument" class="layers-heading">Layers</div>
@@ -689,9 +741,9 @@ onUnmounted(() => {
               <label for="selected-text">Text content</label>
               <textarea id="selected-text" :value="selectedNode.value" @input="updateSelectedText" />
             </section>
-            <section v-if="selectedComponent?.props.length" class="inspector-section props-section">
-              <div class="section-title">Props</div>
-              <label v-for="prop in selectedComponent.props" :key="prop.name" :title="prop.description || prop.type">
+            <section v-if="selectedMetadataProps.length" class="inspector-section props-section">
+              <div class="section-title">{{ selectedComponent ? 'Props' : 'Attributes' }}</div>
+              <label v-for="prop in selectedMetadataProps" :key="prop.name" :title="prop.description || prop.type">
                 <span>
                   {{ prop.name }}
                   <small>{{ prop.required ? 'Required' : prop.type }}</small>
@@ -725,9 +777,9 @@ onUnmounted(() => {
                 <small v-if="propIsExpression(prop)" class="expression-note">Expression props are source-only.</small>
               </label>
             </section>
-            <section v-if="selectedNode.attributes.some((attribute) => !isComponentProp(attribute.name))" class="inspector-section">
+            <section v-if="selectedNode.attributes.some((attribute) => !isMetadataProp(attribute.name))" class="inspector-section">
               <div class="section-title">Attributes</div>
-              <label v-for="attribute in selectedNode.attributes.filter((item) => !isComponentProp(item.name))" :key="attribute.name">
+              <label v-for="attribute in selectedNode.attributes.filter((item) => !isMetadataProp(item.name))" :key="attribute.name">
                 <span>{{ attribute.name }}<small v-if="!attribute.editable">Expression</small></span>
                 <input
                   :value="attribute.value"
@@ -736,7 +788,7 @@ onUnmounted(() => {
                 />
               </label>
             </section>
-            <div v-if="selectedNode.kind !== 'text' && !selectedNode.attributes.length && !selectedComponent?.props.length" class="inspector-empty compact">No attributes on this layer.</div>
+            <div v-if="selectedNode.kind !== 'text' && !selectedNode.attributes.length && !selectedMetadataProps.length" class="inspector-empty compact">No attributes on this layer.</div>
             <div v-if="!selectedNode.editable" class="locked-notice">{{ selectedNode.lockedReason }}</div>
           </template>
         </div>

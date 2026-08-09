@@ -8,7 +8,7 @@ These tickets are ordered by dependency. Each slice must leave the designer in a
 | [01](01-selectable-document-tree.md) | Selectable document tree (complete) | Users can inspect and select editable or locked Vue nodes |
 | [02](02-live-text-and-attributes.md) | Live text and attributes (complete) | Users can edit simple content and preview it before saving |
 | [03](03-component-palette-and-insertion.md) | Component palette and insertion (complete) | Registered components can be inserted from a palette |
-| [03a](03a-native-browser-elements.md) | Native browser elements | Common HTML elements can be inserted and configured visually |
+| [03a](03a-native-browser-elements.md) | Native browser elements (complete) | Common HTML elements can be inserted and configured visually |
 | [04](04-structure-and-slots.md) | Structure and slots (complete) | Users can move, reorder, duplicate, and remove nodes safely |
 | [05](05-props-inspector.md) | Props inspector (complete) | Component props can be configured with metadata-driven controls |
 | [06](06-visual-styles.md) | Visual styles (complete) | Common CSS can be changed without editing source directly |

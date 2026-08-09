@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { DesignerNode } from '@vue-designer/shared'
+import { isVoidElement, type DesignerNode } from '@vue-designer/shared'
 
 const props = defineProps<{
   node: DesignerNode
@@ -32,7 +32,8 @@ function canDrop(intent: DropIntent): boolean {
       && props.node.children.at(-1)?.id === props.draggedNode.id
     if (isAlreadyLastChild) return false
   }
-  if ((intent === 'inside' || intent === 'append') && props.node.kind === 'text') return false
+  if ((intent === 'inside' || intent === 'append')
+    && (props.node.kind === 'text' || (props.node.kind === 'element' && isVoidElement(props.node.label)))) return false
   if ((intent === 'before' || intent === 'after') && props.dragKind === 'component') return false
   return true
 }
@@ -115,7 +116,7 @@ function handleChildDrop(target: DesignerNode, position: 'before' | 'inside' | '
     </ul>
     <div
       class="tree-drop-line tree-drop-line--append"
-      :class="{ active: dropIntent === 'append', available: node.kind !== 'text' && !!dragKind }"
+      :class="{ active: dropIntent === 'append', available: node.kind !== 'text' && !(node.kind === 'element' && isVoidElement(node.label)) && !!dragKind }"
       :style="{ marginLeft: `${25 + (depth ?? 0) * 15}px` }"
       @dragover="handleDragOver($event, 'append')"
       @dragleave="handleDragLeave($event, 'append')"

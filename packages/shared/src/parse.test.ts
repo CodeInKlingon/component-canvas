@@ -86,6 +86,44 @@ describe('parseDesignerDocument', () => {
     })).toThrow('editable elements')
   })
 
+  it('inserts native elements without adding imports', () => {
+    const source = `<script setup>\nconst value = 1\n</script>\n<template>\n  <main></main>\n</template>`
+    const main = parseDesignerDocument(source).tree[0]!
+    const result = applySourceOperation(source, {
+      type: 'insert-native', parentId: main.id, tag: 'section', contentModel: 'normal', defaultContent: 'Section content',
+    })
+    expect(result).toContain('<section>Section content</section>')
+    expect(result).not.toContain('import section')
+    expect(parseDesignerDocument(result).diagnostics).toEqual([])
+  })
+
+  it('inserts child templates and serializes native attributes', () => {
+    const source = `<template><main></main></template>`
+    const main = parseDesignerDocument(source).tree[0]!
+    const result = applySourceOperation(source, {
+      type: 'insert-native', parentId: main.id, tag: 'select', contentModel: 'normal',
+      defaultChildren: '<option value="">Option</option>', attributes: { required: true, name: 'choice' },
+    })
+    expect(result).toContain('<select :required="true" name="choice"><option value="">Option</option></select>')
+    expect(parseDesignerDocument(result).tree[0]?.children[0]?.children[0]).toMatchObject({ label: 'option' })
+  })
+
+  it('generates void elements and rejects children or void parents', () => {
+    const source = `<template><main><input></main></template>`
+    const main = parseDesignerDocument(source).tree[0]!
+    const result = applySourceOperation(source, {
+      type: 'insert-native', parentId: main.id, tag: 'img', contentModel: 'void', attributes: { src: '', alt: 'Preview' },
+    })
+    expect(result).toContain('<img src="" alt="Preview">')
+    expect(result).not.toContain('</img>')
+    expect(() => applySourceOperation(source, {
+      type: 'insert-native', parentId: main.id, tag: 'input', contentModel: 'void', defaultContent: 'Invalid',
+    })).toThrow('cannot have children')
+    expect(() => applySourceOperation(source, {
+      type: 'insert-native', parentId: main.children[0]!.id, tag: 'span', contentModel: 'text', defaultContent: 'Invalid',
+    })).toThrow('cannot contain children')
+  })
+
   it('duplicates, moves, and removes sibling elements', () => {
     const source = `<template>\n  <main>\n    <section>A</section>\n    <section>B</section>\n  </main>\n</template>`
     const sections = parseDesignerDocument(source).tree[0]!.children
