@@ -493,14 +493,13 @@ function handlePreviewMessage(event: MessageEvent): void {
     if (event.data.nodeId === selectedNodeId.value) computedStyles.value = event.data.styles
     return
   }
-  selectedNodeId.value = event.data.nodeId
-  activeStyleSelector.value = ''
-  void loadStyles()
+  const node = findNode(activeDocument.value?.tree ?? [], event.data.nodeId)
+  if (node) selectNode(node)
 }
 
 function handlePreviewLoad(): void {
   const node = selectedNode.value
-  if (node && node.kind !== 'text') selectNode(node)
+  if (node && node.kind !== 'text') selectNode(node, false)
 }
 
 function handleShortcut(event: KeyboardEvent): void {
