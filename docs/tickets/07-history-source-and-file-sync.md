@@ -9,7 +9,7 @@ A user moves freely between visual and source editing, can undo either kind of c
 ## Scope
 
 - Source-transaction undo and redo.
-- Replace the textarea with a Vue-aware code editor.
+- Replace the textarea with the Shiki-backed source view defined in ticket 07a.
 - Source cursor and visual selection synchronization.
 - External file watching and revision notifications.
 - Conflict reload and explicit overwrite/merge choices.
