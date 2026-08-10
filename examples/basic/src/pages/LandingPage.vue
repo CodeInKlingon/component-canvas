@@ -8,7 +8,7 @@ import FeatureCard from '../components/FeatureCard.vue'
     <nav>
       <strong>Fieldnote</strong>
       <span>Product&nbsp;&nbsp;&nbsp; Stories&nbsp;&nbsp;&nbsp; About</span>
-      <AppButton tone="lime">Start a project</AppButton>
+      <AppButton tone="dark">Start a project</AppButton>
     </nav>
 
     <section class="hero">
@@ -19,7 +19,8 @@ import FeatureCard from '../components/FeatureCard.vue'
     </section>
 
     <section class="features">
-      <FeatureCard number="01" title="Start with intent">Turn rough thinking into a shared direction before the details take over.</FeatureCard>
+      <FeatureCard number="01" title="Start with intent">Turn rough thinking into a shared direction before the details take over.
+      </FeatureCard>
       <FeatureCard number="02" title="Build in context">Compose real components where content, behavior, and design stay connected.</FeatureCard>
       <FeatureCard number="03" title="Keep the source">Every decision remains readable Vue code that belongs to your project.</FeatureCard>
     </section>

@@ -1,5 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import {
+  Braces,
+  ChevronDown,
+  Code2,
+  Component,
+  FileCode2,
+  Layers3,
+  Monitor,
+  PanelBottomClose,
+  PanelBottomOpen,
+  Plus,
+  Redo2,
+  RefreshCw,
+  Save,
+  Smartphone,
+  Tablet,
+  Trash2,
+  Undo2,
+} from '@lucide/vue'
 import type {
   DesignerApiError,
   DesignerDocument,
@@ -18,7 +37,7 @@ import { applySourceOperation, isPreviewToEditorMessage, isVoidElement, parseDes
 import TreeNode from './TreeNode.vue'
 import SourceEditor from './SourceEditor.vue'
 import { SourceHistory } from './history'
-import { findNode, findNodeAtOffset, findNodeAtPath, findNodePath } from './selection'
+import { findNode, findNodeAtOffset, findNodeAtPath, findNodePath, findRenderedSelection } from './selection'
 import { nativeElements, type NativeElementMetadata } from './native-elements'
 
 type SaveState = 'clean' | 'dirty' | 'saving' | 'conflict'
@@ -40,7 +59,9 @@ const previewScroll = ref({ x: 0, y: 0 })
 const sourceEditor = ref<InstanceType<typeof SourceEditor> | null>(null)
 const selectedNodeId = ref<string | null>(null)
 const candidateId = ref<string | null>(null)
-const inspectorView = ref<'content' | 'style' | 'source'>('content')
+const inspectorView = ref<'content' | 'style'>('content')
+const sidebarView = ref<'layers' | 'components'>('layers')
+const sourceOpen = ref(true)
 const activeStyleSelector = ref('')
 const styleRules = ref<DesignerStyleRule[]>([])
 const computedStyles = ref<Record<string, string>>({})
@@ -517,15 +538,14 @@ function selectNode(node: DesignerNode, revealInSource = true): void {
   activeStyleSelector.value = ''
   computedStyles.value = {}
   void loadStyles()
-  if (node.kind !== 'text') {
-    previewFrame.value?.contentWindow?.postMessage({
-      channel: 'vue-designer',
-      session: previewSession.value,
-      type: 'select',
-      nodeId: node.id,
-    }, '*')
-  }
-  if (revealInSource && inspectorView.value === 'source') {
+  const canvasNode = findRenderedSelection(activeDocument.value?.tree ?? [], node.id)
+  previewFrame.value?.contentWindow?.postMessage({
+    channel: 'vue-designer',
+    session: previewSession.value,
+    type: 'select',
+    nodeId: canvasNode?.id ?? null,
+  }, '*')
+  if (revealInSource && sourceOpen.value) {
     requestAnimationFrame(() => {
       sourceEditor.value?.focus()
       sourceEditor.value?.setSelectionRange(node.range.start, node.range.end)
@@ -562,7 +582,7 @@ function handlePreviewMessage(event: MessageEvent): void {
       scrollY: previewScroll.value.y,
     }, '*')
     const node = selectedNode.value
-    if (node && node.kind !== 'text') selectNode(node, false)
+    if (node) selectNode(node, false)
     return
   }
   if (event.data.type === 'viewport-state') {
@@ -625,118 +645,120 @@ onUnmounted(() => {
   <div class="studio">
     <header class="topbar">
       <div class="brand">
-        <span class="brand-mark">VD</span>
-        <div><strong>Vue Designer</strong><small>Live component studio</small></div>
+        <!-- <span class="brand-mark">VD</span>
+        <div><strong>Vue Designer</strong><small>Live component studio</small></div> -->
       </div>
       <div class="document-title">
-        <span class="status-dot" :class="saveState" />
+        <FileCode2 :size="14" />
         <span>{{ activeDocument?.path ?? 'No document selected' }}</span>
+        <span class="status-dot" :class="saveState" />
       </div>
       <div class="actions">
         <div class="viewport-switcher" aria-label="Preview viewport">
-          <button :class="{ active: viewportWidth === '100%' }" @click="viewportWidth = '100%'">Desktop</button>
-          <button :class="{ active: viewportWidth === '768px' }" @click="viewportWidth = '768px'">Tablet</button>
-          <button :class="{ active: viewportWidth === '390px' }" @click="viewportWidth = '390px'">Mobile</button>
+          <button :class="{ active: viewportWidth === '100%' }" title="Desktop viewport" @click="viewportWidth = '100%'">
+            <Monitor :size="14" /><span>Desktop</span>
+          </button>
+          <button :class="{ active: viewportWidth === '768px' }" title="Tablet viewport" @click="viewportWidth = '768px'">
+            <Tablet :size="14" /><span>Tablet</span>
+          </button>
+          <button :class="{ active: viewportWidth === '390px' }" title="Mobile viewport" @click="viewportWidth = '390px'">
+            <Smartphone :size="14" /><span>Mobile</span>
+          </button>
         </div>
         <span class="save-state">{{ stateLabel }}</span>
         <div class="history-actions" aria-label="Document history">
-          <button :disabled="!canUndo" title="Undo (Ctrl+Z)" @click="undo">Undo</button>
-          <button :disabled="!canRedo" title="Redo (Ctrl+Y)" @click="redo">Redo</button>
+          <button :disabled="!canUndo" title="Undo (Ctrl+Z)" aria-label="Undo" @click="undo"><Undo2 :size="15" /></button>
+          <button :disabled="!canRedo" title="Redo (Ctrl+Y)" aria-label="Redo" @click="redo"><Redo2 :size="15" /></button>
         </div>
-        <button class="save-button" :disabled="saveState === 'clean' || saveState === 'saving'" @click="save">Save</button>
+        <button class="save-button" :disabled="saveState === 'clean' || saveState === 'saving'" @click="save"><Save :size="15" />Save</button>
       </div>
     </header>
 
     <main class="workspace">
       <aside class="sidebar">
-        <div class="panel-heading"><span>Documents</span><button title="Refresh documents" @click="loadDocuments">Refresh</button></div>
-        <div v-if="loading" class="empty-state">Scanning project...</div>
-        <button
-          v-for="document in documents"
-          :key="document.path"
-          class="document-row"
-          :class="{ selected: document.path === activeDocument?.path }"
-          @click="openDocument(document)"
-        >
-          <span class="vue-icon">V</span>
-          <span><strong>{{ document.name }}</strong><small>{{ document.path }}</small></span>
-        </button>
-        <div v-if="!loading && documents.length === 0" class="empty-state">No Vue documents match the configured pattern.</div>
-        <div class="layers-heading">Components</div>
-        <div class="component-palette">
-          <button
-            v-for="component in components"
-            :key="component.name"
-            :disabled="!canContainChildren(selectedNode)"
-            :title="selectedNode ? `Insert into ${selectedNode.label}` : 'Select a container first'"
-            draggable="true"
-            @dragstart="startComponentDrag($event, component)"
-            @dragend="endTreeDrag"
-            @click="insertComponent(component)"
-          >
-            <span class="component-glyph">+</span>
-            <span><strong>{{ component.label }}</strong><small>{{ component.category }}</small></span>
-          </button>
+        <div class="panel-heading">
+          <span>{{ sidebarView === 'layers' ? 'Layers' : 'Components' }}</span>
+          <button title="Refresh project" aria-label="Refresh project" @click="loadDocuments"><RefreshCw :size="14" /></button>
         </div>
-        <div class="layers-heading">Native</div>
-        <div class="component-palette native-palette">
-          <button
-            v-for="element in nativeElements"
-            :key="element.tag"
-            :disabled="!canContainChildren(selectedNode)"
-            :title="selectedNode ? `Insert into ${selectedNode.label}` : 'Select a container first'"
-            draggable="true"
-            @dragstart="startNativeDrag($event, element)"
-            @dragend="endTreeDrag"
-            @click="insertNative(element)"
-          >
-            <span class="component-glyph">&lt;&gt;</span>
-            <span><strong>{{ element.label }}</strong><small>{{ element.category }}</small></span>
-          </button>
+        <div class="sidebar-content">
+          <template v-if="sidebarView === 'layers'">
+            <div class="document-picker">
+              <FileCode2 :size="15" />
+              <select :value="activeDocument?.path" aria-label="Active document" @change="openDocument(documents.find((item) => item.path === ($event.target as HTMLSelectElement).value)!)">
+                <option v-for="document in documents" :key="document.path" :value="document.path">{{ document.name }}</option>
+              </select>
+              <ChevronDown :size="14" />
+            </div>
+            <div v-if="loading" class="empty-state">Scanning project...</div>
+            <ul v-else-if="activeDocument" class="tree-list">
+              <TreeNode
+                v-for="node in activeDocument.tree"
+                :key="node.id"
+                :node="node"
+                :selected-id="selectedNodeId"
+                :drag-kind="dragKind"
+                :dragged-node="draggedNode"
+                @select="selectNode"
+                @drag-node="startNodeDrag"
+                @drag-end="endTreeDrag"
+                @drop-node="handleTreeDrop"
+              />
+            </ul>
+            <div v-else class="empty-state">No Vue documents match the configured pattern.</div>
+            <div v-if="activeDocument?.diagnostics.length" class="tree-diagnostic">{{ activeDocument.diagnostics[0]?.message }}</div>
+          </template>
+          <template v-else>
+            <div class="palette-intro">Insert into <strong>{{ selectedNode?.label ?? 'a selected container' }}</strong></div>
+            <div class="layers-heading">Project components</div>
+            <div class="component-palette">
+              <button v-for="component in components" :key="component.name" :disabled="!canContainChildren(selectedNode)" :title="selectedNode ? `Insert into ${selectedNode.label}` : 'Select a container first'" draggable="true" @dragstart="startComponentDrag($event, component)" @dragend="endTreeDrag" @click="insertComponent(component)">
+                <span class="component-glyph"><Component :size="14" /></span>
+                <span><strong>{{ component.label }}</strong><small>{{ component.category }}</small></span>
+                <Plus :size="13" />
+              </button>
+            </div>
+            <div class="layers-heading">Native elements</div>
+            <div class="component-palette native-palette">
+              <button v-for="element in nativeElements" :key="element.tag" :disabled="!canContainChildren(selectedNode)" :title="selectedNode ? `Insert into ${selectedNode.label}` : 'Select a container first'" draggable="true" @dragstart="startNativeDrag($event, element)" @dragend="endTreeDrag" @click="insertNative(element)">
+                <span class="component-glyph"><Braces :size="14" /></span>
+                <span><strong>{{ element.label }}</strong><small>{{ element.category }}</small></span>
+                <Plus :size="13" />
+              </button>
+            </div>
+          </template>
         </div>
-        <div v-if="activeDocument" class="layers-heading">Layers</div>
-        <ul v-if="activeDocument" class="tree-list">
-          <TreeNode
-            v-for="node in activeDocument.tree"
-            :key="node.id"
-            :node="node"
-            :selected-id="selectedNodeId"
-            :drag-kind="dragKind"
-            :dragged-node="draggedNode"
-            @select="selectNode"
-            @drag-node="startNodeDrag"
-            @drag-end="endTreeDrag"
-            @drop-node="handleTreeDrop"
-          />
-        </ul>
-        <div v-if="activeDocument?.diagnostics.length" class="tree-diagnostic">
-          {{ activeDocument.diagnostics[0]?.message }}
+        <div class="sidebar-switcher" aria-label="Sidebar view">
+          <button :class="{ active: sidebarView === 'layers' }" @click="sidebarView = 'layers'"><Layers3 :size="15" />Layers</button>
+          <button :class="{ active: sidebarView === 'components' }" @click="sidebarView = 'components'"><Component :size="15" />Components</button>
         </div>
       </aside>
 
-      <section class="canvas-panel">
-        <div class="canvas-label">Canvas <span>{{ viewportWidth }}</span></div>
-        <div class="canvas-scroll">
-          <div class="preview-frame" :style="{ width: viewportWidth }">
-            <iframe
-              v-if="previewUrl"
-              ref="previewFrame"
-              :key="previewUrl"
-              :src="previewUrl"
-              sandbox="allow-scripts"
-              title="Vue document preview"
-              @load="handlePreviewLoad"
-            />
-            <div v-else class="preview-empty">Select a document to begin.</div>
+      <div class="center-workspace" :class="{ 'source-collapsed': !sourceOpen }">
+        <section class="canvas-panel">
+          <div class="canvas-label">Canvas <span>{{ viewportWidth }}</span></div>
+          <div class="canvas-scroll">
+            <div class="preview-frame" :style="{ width: viewportWidth }">
+              <iframe v-if="previewUrl" ref="previewFrame" :key="previewUrl" :src="previewUrl" sandbox="allow-scripts" title="Vue document preview" @load="handlePreviewLoad" />
+              <div v-else class="preview-empty">Select a document to begin.</div>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+        <section class="source-panel">
+          <header class="source-panel-header">
+            <span><Code2 :size="14" />Source</span>
+            <code>{{ activeDocument?.name ?? 'No document' }}</code>
+            <button :title="sourceOpen ? 'Collapse source' : 'Open source'" :aria-label="sourceOpen ? 'Collapse source' : 'Open source'" @click="sourceOpen = !sourceOpen">
+              <PanelBottomClose v-if="sourceOpen" :size="15" /><PanelBottomOpen v-else :size="15" />
+            </button>
+          </header>
+          <SourceEditor v-show="sourceOpen" ref="sourceEditor" :source="source" :disabled="!activeDocument" @input="updateSource" @blur="commitSourceEdit" @cursor="syncSelectionFromSource" />
+        </section>
+      </div>
 
       <aside class="inspector-panel">
         <div class="inspector-tabs">
-          <button :class="{ active: inspectorView === 'content' }" @click="inspectorView = 'content'">Content</button>
+          <button :class="{ active: inspectorView === 'content' }" @click="inspectorView = 'content'">Props</button>
           <button :class="{ active: inspectorView === 'style' }" @click="inspectorView = 'style'">Style</button>
-          <button :class="{ active: inspectorView === 'source' }" @click="inspectorView = 'source'">Source</button>
         </div>
 
         <div v-if="inspectorView === 'content'" class="inspector-content">
@@ -749,8 +771,8 @@ onUnmounted(() => {
               <span class="tree-kind">{{ selectedNode.kind === 'component' ? 'C' : selectedNode.kind === 'text' ? 'T' : 'E' }}</span>
               <div><strong>{{ selectedNode.label }}</strong><small>{{ selectedNode.kind }}</small></div>
               <div class="selection-actions">
-                <button :disabled="!selectedNode.editable" title="Duplicate layer" @click="duplicateSelectedNode">Duplicate</button>
-                <button :disabled="!selectedNode.editable" title="Delete layer" @click="removeSelectedNode">Delete</button>
+                <button :disabled="!selectedNode.editable" title="Duplicate layer" aria-label="Duplicate layer" @click="duplicateSelectedNode"><Plus :size="14" /></button>
+                <button :disabled="!selectedNode.editable" title="Delete layer" aria-label="Delete layer" @click="removeSelectedNode"><Trash2 :size="14" /></button>
               </div>
             </div>
             <section v-if="selectedNode.kind === 'text'" class="inspector-section">
@@ -858,15 +880,6 @@ onUnmounted(() => {
           </template>
         </div>
 
-        <SourceEditor
-          v-else
-          ref="sourceEditor"
-          :source="source"
-          :disabled="!activeDocument"
-          @input="updateSource"
-          @blur="commitSourceEdit"
-          @cursor="syncSelectionFromSource"
-        />
       </aside>
     </main>
 

@@ -36,6 +36,10 @@ export function createCandidateFileId(absolutePath: string, candidateId: string)
   return `${absolutePath}${candidateFileMarker}${candidateId}.vue`
 }
 
+export function createPreviewDocumentId(absolutePath: string): string {
+  return `${absolutePath}?vue-designer-preview`
+}
+
 export function candidateIdFromFile(id: string): string | undefined {
   const file = id.split('?')[0] ?? id
   const marker = file.lastIndexOf(candidateFileMarker)
@@ -201,7 +205,7 @@ export default function vueDesigner(options: VueDesignerOptions): Plugin {
       const appPath = options.app ? path.resolve(config.root, options.app) : null
       const documentImport = candidateId && candidate
         ? `/__designer/candidate.vue?id=${encodeURIComponent(candidateId)}`
-        : absolutePath
+        : createPreviewDocumentId(absolutePath)
       return `
 import { createApp, h } from 'vue'
 const session = ${JSON.stringify(previewSession)}
@@ -244,21 +248,48 @@ try {
 
 let selected
 let scrollFrame
+const selectionOverlay = document.createElement('div')
+selectionOverlay.setAttribute('data-vue-designer-overlay', 'selection')
+selectionOverlay.style.cssText = 'position:fixed;display:none;pointer-events:none;z-index:2147483647;border:2px solid #2563eb;box-sizing:content-box;box-shadow:0 0 0 1px rgba(255,255,255,.9);'
+document.body.append(selectionOverlay)
+const selectionResizeObserver = new ResizeObserver(() => updateSelectionOverlay())
+function updateSelectionOverlay() {
+  if (!selected?.isConnected) {
+    selectionOverlay.style.display = 'none'
+    return
+  }
+  const rect = selected.getBoundingClientRect()
+  if (rect.width === 0 && rect.height === 0) {
+    selectionOverlay.style.display = 'none'
+    return
+  }
+  selectionOverlay.style.display = 'block'
+  selectionOverlay.style.left = (rect.left - 2) + 'px'
+  selectionOverlay.style.top = (rect.top - 2) + 'px'
+  selectionOverlay.style.width = rect.width + 'px'
+  selectionOverlay.style.height = rect.height + 'px'
+}
 addEventListener('scroll', () => {
   cancelAnimationFrame(scrollFrame)
-  scrollFrame = requestAnimationFrame(() => send({ type: 'viewport-state', scrollX, scrollY }))
+  scrollFrame = requestAnimationFrame(() => {
+    updateSelectionOverlay()
+    send({ type: 'viewport-state', scrollX, scrollY })
+  })
 }, { passive: true })
+document.addEventListener('scroll', updateSelectionOverlay, { capture: true, passive: true })
+addEventListener('resize', updateSelectionOverlay, { passive: true })
 function select(nodeId) {
-  selected?.style.removeProperty('outline')
-  selected?.style.removeProperty('outline-offset')
+  if (selected) selectionResizeObserver.unobserve(selected)
   selected = nodeId ? document.querySelector('[data-vue-designer-id="' + CSS.escape(nodeId) + '"]') : null
-  selected?.style.setProperty('outline', '2px solid #78b82a')
-  selected?.style.setProperty('outline-offset', '3px')
   if (selected) {
+    selectionResizeObserver.observe(selected)
+    updateSelectionOverlay()
     const computed = getComputedStyle(selected)
     const properties = ['display', 'width', 'height', 'padding', 'margin', 'gap', 'font-size', 'font-weight', 'text-align', 'color', 'background-color', 'border', 'border-radius']
     const styles = Object.fromEntries(properties.map((property) => [property, computed.getPropertyValue(property)]))
     send({ type: 'computed-style', nodeId, styles })
+  } else {
+    updateSelectionOverlay()
   }
 }
 document.addEventListener('click', (event) => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import vueDesigner, { candidateIdFromFile, createCandidateFileId } from './index'
+import vueDesigner, { candidateIdFromFile, createCandidateFileId, createPreviewDocumentId } from './index'
 
 describe('vueDesigner', () => {
   it('creates a named pre plugin', () => {
@@ -13,5 +13,9 @@ describe('vueDesigner', () => {
     expect(id).toBe('C:/project/src/Page.vue.vue-designer-candidate-candidate-123.vue')
     expect(candidateIdFromFile(`${id}?vue&type=style&index=0&lang.css`)).toBe('candidate-123')
     expect(candidateIdFromFile('C:/project/src/Page.vue?vue&type=style')).toBeUndefined()
+  })
+
+  it('uses a separate module identity for saved-document previews', () => {
+    expect(createPreviewDocumentId('C:/project/src/Page.vue')).toBe('C:/project/src/Page.vue?vue-designer-preview')
   })
 })

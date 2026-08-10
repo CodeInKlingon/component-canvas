@@ -18,6 +18,7 @@ let editor: Editor<unknown> | undefined
 let file: File<unknown> | undefined
 let detach: (() => void) | undefined
 let disposed = false
+let sourceSyncFrame: number | undefined
 
 const cursorPosition = computed(() => {
   const before = props.source.slice(0, cursorOffset.value)
@@ -52,8 +53,8 @@ onMounted(async () => {
   })
   file = new DiffsFile({
     disableFileHeader: true,
-    theme: { dark: 'pierre-dark', light: 'pierre-light' },
-    themeType: 'dark',
+    theme: { dark: 'github-dark', light: 'github-light' },
+    themeType: 'light',
     useTokenTransformer: true,
     overflow: 'scroll',
   })
@@ -65,14 +66,19 @@ onMounted(async () => {
 })
 
 watch(() => props.source, (source) => {
-  const current = editor?.getText()
-  if (current === undefined || current === source) return
-  const end = positionAt(current, current.length)
-  editor?.applyEdits([{ range: { start: { line: 0, character: 0 }, end }, newText: source }])
+  cancelAnimationFrame(sourceSyncFrame ?? 0)
+  sourceSyncFrame = requestAnimationFrame(() => {
+    if (!detach) return
+    const current = editor?.getText()
+    if (current === undefined || current === source) return
+    const end = positionAt(current, current.length)
+    editor?.applyEdits([{ range: { start: { line: 0, character: 0 }, end }, newText: source }])
+  })
 })
 
 onBeforeUnmount(() => {
   disposed = true
+  cancelAnimationFrame(sourceSyncFrame ?? 0)
   mount.value?.removeEventListener('keyup', syncCursor)
   mount.value?.removeEventListener('pointerup', syncCursor)
   detach?.()
@@ -98,7 +104,8 @@ defineExpose({ focus, setSelectionRange })
 
 <template>
   <div class="source-editor-shell">
-    <div ref="mount" class="source-editor-mount" :aria-busy="loading">
+    <div class="source-editor-stage">
+      <div ref="mount" class="source-editor-mount" :aria-busy="loading" />
       <div v-if="loading" class="source-editor-loading">Loading source editor...</div>
     </div>
     <div class="source-editor-status">

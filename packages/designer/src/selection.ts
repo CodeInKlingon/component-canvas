@@ -40,3 +40,13 @@ export function findNodeAtOffset(nodes: DesignerNode[], offset: number): Designe
   }
   return null
 }
+
+export function findRenderedSelection(nodes: DesignerNode[], targetId: string, renderedAncestor: DesignerNode | null = null): DesignerNode | null {
+  for (const node of nodes) {
+    const nextAncestor = node.kind === 'text' ? renderedAncestor : node
+    if (node.id === targetId) return nextAncestor
+    const match = findRenderedSelection(node.children, targetId, nextAncestor)
+    if (match) return match
+  }
+  return null
+}
