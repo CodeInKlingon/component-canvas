@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DesignerNode } from '@vue-designer/shared'
-import { findNodeAtOffset, findNodeAtPath, findNodePath, findRenderedSelection } from './selection'
+import { findNodeAtOffset, findNodeAtPath, findNodePath, findRenderedSelection, reconcileCollapsedTree } from './selection'
 
 function node(id: string, start: number, end: number, children: DesignerNode[] = []): DesignerNode {
   return { id, kind: 'element', label: id, range: { start, end }, editable: true, attributes: [], children }
@@ -28,5 +28,28 @@ describe('selection reconciliation', () => {
     expect(findRenderedSelection(renderedTree, 'copy')?.id).toBe('button')
     expect(findRenderedSelection(renderedTree, 'button')?.id).toBe('button')
     expect(findRenderedSelection(renderedTree, 'missing')).toBeNull()
+  })
+})
+
+describe('reconcileCollapsedTree', () => {
+  const previous = [node('root', 10, 100, [node('group', 20, 80, [node('child', 30, 60)]), node('leaf', 90, 95)])]
+
+  it('keeps collapse state for nodes reconciled by structural path after IDs change', () => {
+    const reparsed = [node('new-root', 12, 102, [node('new-group', 22, 82, [node('new-child', 32, 62)]), node('new-leaf', 92, 97)])]
+    expect([...reconcileCollapsedTree(previous, reparsed, new Set(['group']))]).toEqual(['new-group'])
+  })
+
+  it('drops ids that no longer resolve to a node', () => {
+    const shrunk = [node('new-root', 12, 102, [node('new-group', 22, 82, [node('new-child', 32, 62)])])]
+    expect([...reconcileCollapsedTree(previous, shrunk, new Set(['group', 'leaf']))]).toEqual(['new-group'])
+  })
+
+  it('drops ids whose node lost its children', () => {
+    const flattened = [node('new-root', 12, 102, [node('new-group', 22, 82), node('new-leaf', 92, 97)])]
+    expect([...reconcileCollapsedTree(previous, flattened, new Set(['group']))]).toEqual([])
+  })
+
+  it('returns an empty set when nothing was collapsed', () => {
+    expect([...reconcileCollapsedTree(previous, previous, new Set())]).toEqual([])
   })
 })

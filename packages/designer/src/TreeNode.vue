@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { ChevronRight } from '@lucide/vue'
 import { isVoidElement, type DesignerNode } from '@vue-designer/shared'
 
 const props = defineProps<{
   node: DesignerNode
   selectedId: string | null
+  collapsedIds: ReadonlySet<string>
   depth?: number
   dragKind?: 'component' | 'node' | null
   draggedNode?: DesignerNode | null
@@ -12,10 +14,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   select: [node: DesignerNode]
+  toggleCollapse: [node: DesignerNode]
   dragNode: [node: DesignerNode]
   dragEnd: []
   dropNode: [target: DesignerNode, position: 'before' | 'inside' | 'after']
 }>()
+
+const collapsed = computed(() => props.collapsedIds.has(props.node.id))
 
 type DropIntent = 'before' | 'inside' | 'append' | 'after'
 
@@ -77,38 +82,52 @@ function handleChildDrop(target: DesignerNode, position: 'before' | 'inside' | '
     <div
       class="tree-drop-line tree-drop-line--before"
       :class="{ active: dropIntent === 'before', available: dragKind === 'node' }"
-      :style="{ marginLeft: `${10 + (depth ?? 0) * 15}px` }"
+      :style="{ marginLeft: `${30 + (depth ?? 0) * 15}px` }"
       @dragover="handleDragOver($event, 'before')"
       @dragleave="handleDragLeave($event, 'before')"
       @drop="handleDrop($event, 'before')"
     />
-    <button
-      class="tree-row"
-      :class="{ selected: selectedId === node.id, locked: !node.editable, 'drop-target': dropIntent === 'inside' || dropIntent === 'append' }"
-      :style="{ paddingLeft: `${10 + (depth ?? 0) * 15}px` }"
-      :title="node.lockedReason"
-      :draggable="node.editable"
-      @click="emit('select', node)"
-      @dragstart="handleDragStart"
-      @dragend="emit('dragEnd')"
-      @dragover="handleDragOver($event, 'inside')"
-      @dragleave="handleDragLeave($event, 'inside')"
-      @drop="handleDrop($event, 'inside')"
-    >
-      <span class="tree-kind">{{ node.kind === 'component' ? 'C' : node.kind === 'text' ? 'T' : 'E' }}</span>
-      <span class="tree-label">{{ node.kind === 'text' ? `“${node.label}”` : node.label }}</span>
-      <span v-if="!node.editable" class="lock-mark">Locked</span>
-    </button>
-    <ul v-if="node.children.length">
+    <div class="tree-line" :style="{ paddingLeft: `${10 + (depth ?? 0) * 15}px` }">
+      <button
+        v-if="node.children.length"
+        class="tree-disclosure"
+        :class="{ expanded: !collapsed }"
+        :aria-expanded="!collapsed"
+        :aria-label="collapsed ? `Expand ${node.label}` : `Collapse ${node.label}`"
+        @click="emit('toggleCollapse', node)"
+      >
+        <ChevronRight :size="13" />
+      </button>
+      <span v-else class="tree-disclosure tree-disclosure--spacer" aria-hidden="true"></span>
+      <button
+        class="tree-row"
+        :class="{ selected: selectedId === node.id, locked: !node.editable, 'drop-target': dropIntent === 'inside' || dropIntent === 'append' }"
+        :title="node.lockedReason"
+        :draggable="node.editable"
+        @click="emit('select', node)"
+        @dragstart="handleDragStart"
+        @dragend="emit('dragEnd')"
+        @dragover="handleDragOver($event, 'inside')"
+        @dragleave="handleDragLeave($event, 'inside')"
+        @drop="handleDrop($event, 'inside')"
+      >
+        <span class="tree-kind">{{ node.kind === 'component' ? 'C' : node.kind === 'text' ? 'T' : 'E' }}</span>
+        <span class="tree-label">{{ node.kind === 'text' ? `“${node.label}”` : node.label }}</span>
+        <span v-if="!node.editable" class="lock-mark">Locked</span>
+      </button>
+    </div>
+    <ul v-if="node.children.length && !collapsed">
       <TreeNode
         v-for="child in node.children"
         :key="child.id"
         :node="child"
         :selected-id="selectedId"
+        :collapsed-ids="collapsedIds"
         :depth="(depth ?? 0) + 1"
         :drag-kind="dragKind"
         :dragged-node="draggedNode"
         @select="emit('select', $event)"
+        @toggle-collapse="emit('toggleCollapse', $event)"
         @drag-node="emit('dragNode', $event)"
         @drag-end="emit('dragEnd')"
         @drop-node="handleChildDrop"
@@ -117,7 +136,7 @@ function handleChildDrop(target: DesignerNode, position: 'before' | 'inside' | '
     <div
       class="tree-drop-line tree-drop-line--append"
       :class="{ active: dropIntent === 'append', available: node.kind !== 'text' && !(node.kind === 'element' && isVoidElement(node.label)) && !!dragKind }"
-      :style="{ marginLeft: `${25 + (depth ?? 0) * 15}px` }"
+      :style="{ marginLeft: `${45 + (depth ?? 0) * 15}px` }"
       @dragover="handleDragOver($event, 'append')"
       @dragleave="handleDragLeave($event, 'append')"
       @drop="handleDrop($event, 'append')"
@@ -125,7 +144,7 @@ function handleChildDrop(target: DesignerNode, position: 'before' | 'inside' | '
     <div
       class="tree-drop-line tree-drop-line--after"
       :class="{ active: dropIntent === 'after', available: dragKind === 'node' }"
-      :style="{ marginLeft: `${10 + (depth ?? 0) * 15}px` }"
+      :style="{ marginLeft: `${30 + (depth ?? 0) * 15}px` }"
       @dragover="handleDragOver($event, 'after')"
       @dragleave="handleDragLeave($event, 'after')"
       @drop="handleDrop($event, 'after')"

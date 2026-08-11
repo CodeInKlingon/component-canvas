@@ -50,3 +50,13 @@ export function findRenderedSelection(nodes: DesignerNode[], targetId: string, r
   }
   return null
 }
+
+export function reconcileCollapsedTree(previous: DesignerNode[], next: DesignerNode[], collapsed: ReadonlySet<string>): Set<string> {
+  const reconciled = new Set<string>()
+  for (const id of collapsed) {
+    const path = findNodePath(previous, id)
+    const node = path ? findNodeAtPath(next, path) : null
+    if (node && node.children.length) reconciled.add(node.id)
+  }
+  return reconciled
+}

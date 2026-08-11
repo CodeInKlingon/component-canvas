@@ -37,7 +37,7 @@ import { applySourceOperation, isPreviewToEditorMessage, isVoidElement, parseDes
 import TreeNode from './TreeNode.vue'
 import SourceEditor from './SourceEditor.vue'
 import { SourceHistory } from './history'
-import { findNode, findNodeAtOffset, findNodeAtPath, findNodePath, findRenderedSelection } from './selection'
+import { findNode, findNodeAtOffset, findNodeAtPath, findNodePath, findRenderedSelection, reconcileCollapsedTree } from './selection'
 import { nativeElements, type NativeElementMetadata } from './native-elements'
 
 type SaveState = 'clean' | 'dirty' | 'saving' | 'conflict'
@@ -58,6 +58,8 @@ const previewDiagnostic = ref<{ level: 'error' | 'warning' | 'info'; message: st
 const previewScroll = ref({ x: 0, y: 0 })
 const sourceEditor = ref<InstanceType<typeof SourceEditor> | null>(null)
 const selectedNodeId = ref<string | null>(null)
+const collapsedIds = ref<ReadonlySet<string>>(new Set())
+const treeCollapseState = new Map<string, Set<string>>()
 const candidateId = ref<string | null>(null)
 const inspectorView = ref<'content' | 'style'>('content')
 const sidebarView = ref<'layers' | 'components'>('layers')
@@ -268,6 +270,7 @@ async function openDocument(document: DesignerDocumentSummary): Promise<void> {
     saveState.value = 'clean'
     externalRevision.value = null
     selectedNodeId.value = null
+    collapsedIds.value = treeCollapseState.get(document.path) ?? new Set()
     candidateId.value = null
     previewSession.value = crypto.randomUUID()
     previewDiagnostic.value = null
@@ -298,6 +301,7 @@ async function createCandidate(candidateSource: string): Promise<void> {
     const parsed = parseDesignerDocument(candidateSource)
     candidateId.value = null
     activeDocument.value = { ...document, tree: parsed.tree, diagnostics: parsed.diagnostics }
+    replaceTree(parsed.tree)
     selectedNodeId.value = findNode(parsed.tree, selectedNodeId.value)?.id
       ?? findNodeAtPath(parsed.tree, selectedPath)?.id
       ?? null
@@ -316,6 +320,7 @@ async function createCandidate(candidateSource: string): Promise<void> {
     if (request !== candidateRequest || source.value !== candidateSource) return
     candidateId.value = result.candidateId
     activeDocument.value = { ...document, tree: result.tree, diagnostics: result.diagnostics }
+    replaceTree(result.tree)
     selectedNodeId.value = findNode(result.tree, selectedNodeId.value)?.id
       ?? findNodeAtPath(result.tree, selectedPath)?.id
       ?? null
@@ -437,6 +442,7 @@ function updateStyle(property: string, event: Event): void {
     candidateId.value = result.candidateId
     styleRules.value = result.rules
     activeDocument.value = { ...document, tree: result.tree, diagnostics: result.diagnostics }
+    replaceTree(result.tree)
     selectedNodeId.value = findNode(result.tree, selectedNodeId.value)?.id
       ?? findNodeAtPath(result.tree, selectedPath)?.id
       ?? null
@@ -538,6 +544,7 @@ function selectNode(node: DesignerNode, revealInSource = true): void {
   activeStyleSelector.value = ''
   computedStyles.value = {}
   void loadStyles()
+  revealAncestors(node)
   const canvasNode = findRenderedSelection(activeDocument.value?.tree ?? [], node.id)
   previewFrame.value?.contentWindow?.postMessage({
     channel: 'vue-designer',
@@ -551,6 +558,39 @@ function selectNode(node: DesignerNode, revealInSource = true): void {
       sourceEditor.value?.setSelectionRange(node.range.start, node.range.end)
     })
   }
+}
+
+function revealAncestors(node: DesignerNode): void {
+  const tree = activeDocument.value?.tree
+  if (!tree) return
+  const path = findNodePath(tree, node.id)
+  if (!path) return
+  const ids = new Set(collapsedIds.value)
+  let changed = false
+  for (let i = 0; i < path.length - 1; i++) {
+    const ancestor = findNodeAtPath(tree, path.slice(0, i + 1))
+    if (ancestor && ids.delete(ancestor.id)) changed = true
+  }
+  if (changed) {
+    collapsedIds.value = ids
+    if (activeDocument.value) treeCollapseState.set(activeDocument.value.path, ids)
+  }
+}
+
+function toggleCollapse(node: DesignerNode): void {
+  const ids = new Set(collapsedIds.value)
+  if (ids.has(node.id)) ids.delete(node.id)
+  else ids.add(node.id)
+  collapsedIds.value = ids
+  if (activeDocument.value) treeCollapseState.set(activeDocument.value.path, ids)
+}
+
+function replaceTree(nextTree: DesignerNode[]): void {
+  const document = activeDocument.value
+  if (!document) return
+  const reconciled = reconcileCollapsedTree(document.tree, nextTree, collapsedIds.value)
+  collapsedIds.value = reconciled
+  treeCollapseState.set(document.path, reconciled)
 }
 
 function syncSelectionFromSource(offset: number): void {
@@ -696,9 +736,11 @@ onUnmounted(() => {
                 :key="node.id"
                 :node="node"
                 :selected-id="selectedNodeId"
+                :collapsed-ids="collapsedIds"
                 :drag-kind="dragKind"
                 :dragged-node="draggedNode"
                 @select="selectNode"
+                @toggle-collapse="toggleCollapse"
                 @drag-node="startNodeDrag"
                 @drag-end="endTreeDrag"
                 @drop-node="handleTreeDrop"
