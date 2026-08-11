@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import designer from '@vue-designer/vite'
+import designer from '../../packages/vite-plugin/src/index.ts'
 
 export default defineConfig({
   plugins: [
@@ -11,4 +11,7 @@ export default defineConfig({
       components: './src/designer-components.ts',
     }),
   ],
+  server: {
+    host: "127.0.0.1"
+  }
 })

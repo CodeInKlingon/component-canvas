@@ -15,9 +15,9 @@ import type {
   DesignerDocumentChangedEvent,
   PreviewCandidateResponse,
   SaveDocumentRequest,
-} from '@vue-designer/shared'
-import { instrumentDesignerNodes, parseDesignerDocument } from '@vue-designer/shared'
-import { applyStyleOperation, getDesignerStyleRules } from '@vue-designer/shared/style'
+} from '../../shared/src/index.ts'
+import { instrumentDesignerNodes, parseDesignerDocument } from '../../shared/src/index.ts'
+import { applyStyleOperation, getDesignerStyleRules } from '../../shared/src/style.ts'
 import { CapabilityStore } from './capabilities.ts'
 
 export interface VueDesignerOptions {
