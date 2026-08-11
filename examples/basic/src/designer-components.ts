@@ -1,6 +1,7 @@
 import AppButton from './components/AppButton.vue'
 import FeatureCard from './components/FeatureCard.vue'
 import NoticeBadge from './components/NoticeBadge.vue'
+import MetricHighlight from './components/MetricHighlight.vue'
 
 export default {
   AppButton: {
@@ -24,5 +25,11 @@ export default {
     props: {
       accent: { control: 'color' },
     },
+  },
+  MetricHighlight: {
+    component: MetricHighlight,
+    source: './components/MetricHighlight.vue',
+    label: 'Metric highlight',
+    category: 'Content',
   },
 }

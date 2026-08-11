@@ -18,4 +18,9 @@ describe('preview protocol validation', () => {
     expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'viewport-state', scrollX: 0, scrollY: Infinity })).toBe(false)
     expect(isEditorToPreviewMessage({ channel: 'vue-designer', session: 'session', type: 'restore-viewport', scrollX: 4, scrollY: 120 })).toBe(true)
   })
+
+  it('accepts AI prompt actions only for a selected node', () => {
+    expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'ai-prompt', nodeId: 'node-1' })).toBe(true)
+    expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'ai-prompt', nodeId: null })).toBe(false)
+  })
 })

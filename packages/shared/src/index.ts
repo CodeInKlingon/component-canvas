@@ -66,6 +66,21 @@ export interface PreviewCandidateResponse {
   diagnostics: DesignerDiagnostic[]
 }
 
+export interface DesignerAiRequest {
+  path: string
+  source: string
+  prompt: string
+  selection: {
+    nodeId: string
+    range: DesignerSourceRange
+    source: string
+  }
+}
+
+export interface DesignerAiResponse {
+  source: string
+}
+
 export interface DesignerComponentMetadata {
   name: string
   label: string
@@ -149,6 +164,7 @@ export type PreviewToEditorMessage =
   | { channel: 'vue-designer'; session: string; type: 'ready' }
   | { channel: 'vue-designer'; session: string; type: 'viewport-state'; scrollX: number; scrollY: number }
   | { channel: 'vue-designer'; session: string; type: 'select'; nodeId: string }
+  | { channel: 'vue-designer'; session: string; type: 'ai-prompt'; nodeId: string }
   | { channel: 'vue-designer'; session: string; type: 'computed-style'; nodeId: string; styles: Record<string, string> }
   | { channel: 'vue-designer'; session: string; type: 'diagnostic'; level: 'error' | 'warning' | 'info'; message: string; stack?: string }
 
@@ -169,7 +185,7 @@ export function isPreviewToEditorMessage(value: unknown): value is PreviewToEdit
       && (message.stack === undefined || typeof message.stack === 'string')
   }
   if (typeof message.nodeId !== 'string') return false
-  if (message.type === 'select') return true
+  if (message.type === 'select' || message.type === 'ai-prompt') return true
   return message.type === 'computed-style' && !!message.styles && typeof message.styles === 'object'
 }
 

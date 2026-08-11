@@ -3,3 +3,6 @@ dist
 .vite
 coverage
 *.tsbuildinfo
+.env
+.env.*
+!.env.example

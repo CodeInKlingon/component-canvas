@@ -9,6 +9,7 @@ export default defineConfig({
       documents: 'src/pages/**/*.vue',
       app: './src/designer-app.ts',
       components: './src/designer-components.ts',
+      ai: {},
     }),
   ],
   server: {

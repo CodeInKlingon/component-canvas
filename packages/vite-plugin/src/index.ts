@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fg from 'fast-glob'
 import { createChecker, type ComponentMetaChecker, type PropertyMetaSchema } from 'vue-component-meta'
-import type { Plugin, ResolvedConfig } from 'vite'
+import { loadEnv, type Plugin, type ResolvedConfig } from 'vite'
 import type {
   DesignerDocument,
   DesignerDocumentSummary,
@@ -13,18 +13,22 @@ import type {
   DesignerStyleCandidateResponse,
   DesignerStyleOperation,
   DesignerDocumentChangedEvent,
+  DesignerAiRequest,
+  DesignerAiResponse,
   PreviewCandidateResponse,
   SaveDocumentRequest,
 } from '../../shared/src/index.ts'
 import { instrumentDesignerNodes, parseDesignerDocument } from '../../shared/src/index.ts'
 import { applyStyleOperation, getDesignerStyleRules } from '../../shared/src/style.ts'
 import { CapabilityStore } from './capabilities.ts'
+import { generateVueSource, type CursorAiOptions } from './ai.ts'
 
 export interface VueDesignerOptions {
   documents: string | string[]
   app?: string
   components?: string
   previewPort?: number
+  ai?: CursorAiOptions
 }
 
 const designerEntry = fileURLToPath(
@@ -91,6 +95,18 @@ function isStyleRequest(value: unknown): value is { path: string; source: string
     && !!candidate.operation && typeof candidate.operation === 'object'
 }
 
+function isAiRequest(value: unknown): value is DesignerAiRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  if (typeof candidate.path !== 'string' || typeof candidate.source !== 'string'
+    || typeof candidate.prompt !== 'string' || !candidate.prompt.trim()
+    || !candidate.selection || typeof candidate.selection !== 'object') return false
+  const selection = candidate.selection as Record<string, unknown>
+  const range = selection.range as Record<string, unknown> | undefined
+  return typeof selection.nodeId === 'string' && typeof selection.source === 'string'
+    && !!range && Number.isInteger(range.start) && Number.isInteger(range.end)
+}
+
 function literalOptions(schema: PropertyMetaSchema): string[] {
   if (typeof schema === 'string') return []
   if (schema.kind === 'literal') return [schema.value.replace(/^(['"])(.*)\1$/, '$2')]
@@ -121,6 +137,7 @@ export default function vueDesigner(options: VueDesignerOptions): Plugin {
   const capabilities = new CapabilityStore()
   let componentChecker: ComponentMetaChecker | undefined
   let previewOrigin = ''
+  let cursorAiOptions: CursorAiOptions | undefined
 
   async function discoverDocuments(): Promise<DesignerDocumentSummary[]> {
     const patterns = Array.isArray(options.documents)
@@ -252,15 +269,30 @@ const selectionOverlay = document.createElement('div')
 selectionOverlay.setAttribute('data-vue-designer-overlay', 'selection')
 selectionOverlay.style.cssText = 'position:fixed;display:none;pointer-events:none;z-index:2147483647;border:2px solid #2563eb;box-sizing:content-box;box-shadow:0 0 0 1px rgba(255,255,255,.9);'
 document.body.append(selectionOverlay)
+const aiButton = document.createElement('button')
+aiButton.type = 'button'
+aiButton.title = 'Edit selection with AI'
+aiButton.setAttribute('aria-label', 'Edit selection with AI')
+aiButton.textContent = 'AI'
+aiButton.style.cssText = 'position:fixed;display:none;width:30px;height:28px;padding:0;border:1px solid #bfdbfe;border-radius:8px;background:#fff;color:#2563eb;font:700 11px system-ui;box-shadow:0 3px 10px rgba(15,23,42,.2);cursor:pointer;z-index:2147483647;'
+aiButton.addEventListener('click', (event) => {
+  event.preventDefault()
+  event.stopPropagation()
+  const nodeId = selected?.getAttribute('data-vue-designer-id')
+  if (nodeId) send({ type: 'ai-prompt', nodeId })
+})
+document.body.append(aiButton)
 const selectionResizeObserver = new ResizeObserver(() => updateSelectionOverlay())
 function updateSelectionOverlay() {
   if (!selected?.isConnected) {
     selectionOverlay.style.display = 'none'
+    aiButton.style.display = 'none'
     return
   }
   const rect = selected.getBoundingClientRect()
   if (rect.width === 0 && rect.height === 0) {
     selectionOverlay.style.display = 'none'
+    aiButton.style.display = 'none'
     return
   }
   selectionOverlay.style.display = 'block'
@@ -268,6 +300,9 @@ function updateSelectionOverlay() {
   selectionOverlay.style.top = (rect.top - 2) + 'px'
   selectionOverlay.style.width = rect.width + 'px'
   selectionOverlay.style.height = rect.height + 'px'
+  aiButton.style.display = ${JSON.stringify(!!options.ai)} ? 'block' : 'none'
+  aiButton.style.left = Math.max(4, rect.right - 24) + 'px'
+  aiButton.style.top = Math.max(4, rect.top - 34) + 'px'
 }
 addEventListener('scroll', () => {
   cancelAnimationFrame(scrollFrame)
@@ -331,6 +366,10 @@ addEventListener('message', (event) => {
     },
     configResolved(resolvedConfig) {
       config = resolvedConfig
+      if (options.ai) {
+        const env = loadEnv(config.mode, config.root, '')
+        cursorAiOptions = { ...options.ai, apiKey: options.ai.apiKey ?? env.CURSOR_API_KEY }
+      }
     },
     configureServer(server) {
       const startPreviewServer = () => {
@@ -445,7 +484,7 @@ export function injectQuery(url) { return url }
 
           if (request.method === 'GET' && url.pathname === '/__designer/api/config') {
             if (!previewOrigin) return json(response, 503, { error: 'Preview server is starting' })
-            return json(response, 200, { previewOrigin })
+            return json(response, 200, { previewOrigin, aiEnabled: !!options.ai })
           }
 
           if (url.pathname.startsWith('/__designer/api/')
@@ -520,6 +559,23 @@ export function injectQuery(url) { return url }
               tree: parsed.tree,
               diagnostics: parsed.diagnostics,
             }
+            return json(response, 200, result)
+          }
+
+          if (request.method === 'POST' && url.pathname === '/__designer/api/ai') {
+            if (!options.ai) return json(response, 404, { error: 'AI editing is not configured' })
+            const body = await readBody(request)
+            if (!isAiRequest(body) || !await resolveDocument(body.path)
+              || body.selection.range.start < 0 || body.selection.range.end > body.source.length
+              || body.selection.range.start >= body.selection.range.end
+              || body.source.slice(body.selection.range.start, body.selection.range.end) !== body.selection.source) {
+              return json(response, 400, { error: 'Invalid AI edit request' })
+            }
+            const proposedSource = await generateVueSource(body, config.root, cursorAiOptions ?? options.ai)
+            const parsed = parseDesignerDocument(proposedSource)
+            const parseError = parsed.diagnostics.find((item) => item.severity === 'error')
+            if (parseError) return json(response, 422, { error: `Cursor returned invalid Vue source: ${parseError.message}` })
+            const result: DesignerAiResponse = { source: proposedSource }
             return json(response, 200, result)
           }
 

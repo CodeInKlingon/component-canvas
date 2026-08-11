@@ -14,6 +14,7 @@ import {
   Redo2,
   RefreshCw,
   Save,
+  Sparkles,
   Smartphone,
   Tablet,
   Trash2,
@@ -30,6 +31,7 @@ import type {
   DesignerPropMetadata,
   DesignerStyleRule,
   DesignerStyleCandidateResponse,
+  DesignerAiResponse,
   DesignerDocumentChangedEvent,
   PreviewCandidateResponse,
 } from '@vue-designer/shared'
@@ -71,6 +73,10 @@ const draggedComponent = ref<DesignerComponentMetadata | null>(null)
 const draggedNative = ref<NativeElementMetadata | null>(null)
 const draggedNode = ref<DesignerNode | null>(null)
 const externalRevision = ref<string | null>(null)
+const aiEnabled = ref(false)
+const aiPromptOpen = ref(false)
+const aiPrompt = ref('')
+const aiRunning = ref(false)
 const historyVersion = ref(0)
 const history = new SourceHistory()
 let sourcePreviewTimer: number | undefined
@@ -149,11 +155,12 @@ async function loadDocuments(): Promise<void> {
     const [loadedDocuments, loadedComponents, config] = await Promise.all([
       api<DesignerDocumentSummary[]>('/__designer/api/documents'),
       api<DesignerComponentMetadata[]>('/__designer/api/components'),
-      api<{ previewOrigin: string }>('/__designer/api/config'),
+      api<{ previewOrigin: string; aiEnabled: boolean }>('/__designer/api/config'),
     ])
     documents.value = loadedDocuments
     components.value = loadedComponents
     previewOrigin.value = config.previewOrigin
+    aiEnabled.value = config.aiEnabled
     if (documents.value[0]) await openDocument(documents.value[0])
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Unable to load documents'
@@ -340,6 +347,48 @@ async function applyOperation(operation: DesignerSourceOperation): Promise<void>
     await createCandidate(candidateSource)
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Unable to edit selection'
+  }
+}
+
+async function runAiEdit(): Promise<void> {
+  const document = activeDocument.value
+  const node = selectedNode.value
+  const prompt = aiPrompt.value.trim()
+  if (!document || !node || !prompt || aiRunning.value) return
+  const requestSource = source.value
+  aiRunning.value = true
+  error.value = ''
+  try {
+    const result = await api<DesignerAiResponse>('/__designer/api/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        path: document.path,
+        source: requestSource,
+        prompt,
+        selection: {
+          nodeId: node.id,
+          range: node.range,
+          source: requestSource.slice(node.range.start, node.range.end),
+        },
+      }),
+    })
+    if (source.value !== requestSource) throw new Error('The document changed while Cursor was working. Run the prompt again.')
+    if (result.source === requestSource) {
+      aiPromptOpen.value = false
+      aiPrompt.value = ''
+      return
+    }
+    recordSource(result.source)
+    source.value = result.source
+    saveState.value = result.source === document.source ? 'clean' : 'dirty'
+    await createCandidate(result.source)
+    aiPromptOpen.value = false
+    aiPrompt.value = ''
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : 'Unable to apply AI edit'
+  } finally {
+    aiRunning.value = false
   }
 }
 
@@ -540,6 +589,7 @@ function redo(): void {
 }
 
 function selectNode(node: DesignerNode, revealInSource = true): void {
+  aiPromptOpen.value = false
   selectedNodeId.value = node.id
   activeStyleSelector.value = ''
   computedStyles.value = {}
@@ -638,7 +688,10 @@ function handlePreviewMessage(event: MessageEvent): void {
     return
   }
   const node = findNode(activeDocument.value?.tree ?? [], event.data.nodeId)
-  if (node) selectNode(node)
+  if (node) {
+    selectNode(node, event.data.type !== 'ai-prompt')
+    if (event.data.type === 'ai-prompt' && aiEnabled.value) aiPromptOpen.value = true
+  }
 }
 
 function reloadPreview(): void {
@@ -784,6 +837,14 @@ onUnmounted(() => {
               <div v-else class="preview-empty">Select a document to begin.</div>
             </div>
           </div>
+          <form v-if="aiPromptOpen && selectedNode" class="ai-prompt" @submit.prevent="runAiEdit">
+            <div class="ai-prompt-heading"><Sparkles :size="15" /><strong>Edit {{ selectedNode.label }} with AI</strong></div>
+            <textarea v-model="aiPrompt" autofocus :disabled="aiRunning" placeholder="Describe the change, then move on..." @keydown.esc="aiPromptOpen = false" />
+            <div class="ai-prompt-actions">
+              <button type="button" :disabled="aiRunning" @click="aiPromptOpen = false">Cancel</button>
+              <button type="submit" :disabled="!aiPrompt.trim() || aiRunning"><Sparkles :size="13" />{{ aiRunning ? 'Working...' : 'Apply' }}</button>
+            </div>
+          </form>
         </section>
         <section class="source-panel">
           <header class="source-panel-header">
