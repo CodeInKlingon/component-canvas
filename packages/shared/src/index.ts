@@ -200,4 +200,4 @@ export function isEditorToPreviewMessage(value: unknown): value is EditorToPrevi
     && typeof message.property === 'string' && (message.value === null || typeof message.value === 'string')
 }
 
-export { applySourceOperation, instrumentDesignerNodes, parseDesignerDocument } from './parse.ts'
+export { applySourceOperation, instrumentDesignerNodes, parseDesignerDocument } from './parse.js'

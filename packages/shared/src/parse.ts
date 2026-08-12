@@ -1,6 +1,6 @@
 import { NodeTypes, parse as parseTemplate, type TemplateChildNode } from '@vue/compiler-dom'
 import { parse as parseSfc } from '@vue/compiler-sfc'
-import type { DesignerAttribute, DesignerDiagnostic, DesignerNode, DesignerSourceOperation } from './index'
+import type { DesignerAttribute, DesignerDiagnostic, DesignerNode, DesignerSourceOperation } from './index.js'
 
 export interface ParsedDesignerDocument {
   tree: DesignerNode[]

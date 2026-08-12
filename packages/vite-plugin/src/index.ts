@@ -17,11 +17,11 @@ import type {
   DesignerAiResponse,
   PreviewCandidateResponse,
   SaveDocumentRequest,
-} from '../../shared/src/index.ts'
-import { instrumentDesignerNodes, parseDesignerDocument } from '../../shared/src/index.ts'
-import { applyStyleOperation, getDesignerStyleRules } from '../../shared/src/style.ts'
-import { CapabilityStore } from './capabilities.ts'
-import { generateVueSource, type CursorAiOptions } from './ai.ts'
+} from '@vue-designer/shared'
+import { instrumentDesignerNodes, parseDesignerDocument } from '@vue-designer/shared'
+import { applyStyleOperation, getDesignerStyleRules } from '@vue-designer/shared/style'
+import { CapabilityStore } from './capabilities.js'
+import { generateVueSource, type CursorAiOptions } from './ai.js'
 
 export interface VueDesignerOptions {
   documents: string | string[]
