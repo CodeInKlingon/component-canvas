@@ -19,6 +19,9 @@ These tickets are ordered by dependency. Each slice must leave the designer in a
 | [10](10-browser-isolated-preview-spike.md) | Browser-isolated preview spike | AlmostNode is evaluated for running untrusted Vue and Vite build code in the browser |
 | [11](11-editor-ui-polish.md) | Editor UI polish | Light and dark themes, adaptable panels, and collapsible palettes make the workspace cohesive and configurable |
 | [12](12-advanced-style-inspector.md) | Advanced style inspector | Contextual controls and unrestricted CSS values provide depth without cluttering common workflows |
+| [13](13-selection-preserved-while-dragging.md) | Selection preserved while dragging | Dragging nodes keeps the intended selection stable |
+| [14](14-copy-paste-and-duplicate-context-menus.md) | Copy, paste, and duplicate context menus | Tree and canvas context menus support clipboard workflows |
+| [15](15-props-inspector-complex-values.md) | Props inspector complex values | Array, object, and expression props render with appropriate controls |
 
 ## Working Agreement
 
