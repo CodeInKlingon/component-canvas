@@ -273,8 +273,8 @@ const aiButton = document.createElement('button')
 aiButton.type = 'button'
 aiButton.title = 'Edit selection with AI'
 aiButton.setAttribute('aria-label', 'Edit selection with AI')
-aiButton.textContent = 'AI'
-aiButton.style.cssText = 'position:fixed;display:none;width:30px;height:28px;padding:0;border:1px solid #bfdbfe;border-radius:8px;background:#fff;color:#2563eb;font:700 11px system-ui;box-shadow:0 3px 10px rgba(15,23,42,.2);cursor:pointer;z-index:2147483647;'
+aiButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><!-- Icon from Lucide by Lucide Contributors - https://github.com/lucide-icons/lucide/blob/main/LICENSE --><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594zM20 2v4m2-2h-4"/><circle cx="4" cy="20" r="2"/></g></svg>'
+aiButton.style.cssText = 'position:fixed;display:none;place-items:center;width:25px;height:25px;padding:0;border:0px solid #bfdbfe;border-radius:8px;background:#2563eb;color:#fff;font:700 11px system-ui;cursor:pointer;z-index:2147483647;'
 aiButton.addEventListener('click', (event) => {
   event.preventDefault()
   event.stopPropagation()
@@ -300,7 +300,7 @@ function updateSelectionOverlay() {
   selectionOverlay.style.top = (rect.top - 2) + 'px'
   selectionOverlay.style.width = rect.width + 'px'
   selectionOverlay.style.height = rect.height + 'px'
-  aiButton.style.display = ${JSON.stringify(!!options.ai)} ? 'block' : 'none'
+  aiButton.style.display = ${JSON.stringify(!!options.ai)} ? 'grid' : 'none'
   aiButton.style.left = Math.max(4, rect.right - 24) + 'px'
   aiButton.style.top = Math.max(4, rect.top - 34) + 'px'
 }

@@ -24,6 +24,11 @@ import FeatureCard from '../components/FeatureCard.vue'
       <FeatureCard number="02" title="Build in context">Compose real components where content, behavior, and design stay connected.</FeatureCard>
       <FeatureCard number="03" title="Keep the source">Every decision remains readable Vue code that belongs to your project.</FeatureCard>
     </section>
+
+    <section class="features">
+      <FeatureCard v-for="(number, index) in 5" :number="index.toString()" title="Start with intent">Turn rough thinking into a shared direction before the details take over.
+      </FeatureCard>
+    </section>
   </main>
 </template>
 

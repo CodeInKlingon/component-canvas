@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ChevronRight } from '@lucide/vue'
+import { ChevronRight, CodeXml, Component, ComponentIcon, Type } from '@lucide/vue'
 import { isVoidElement, type DesignerNode } from '@vue-designer/shared'
 
 const props = defineProps<{
@@ -111,7 +111,11 @@ function handleChildDrop(target: DesignerNode, position: 'before' | 'inside' | '
         @dragleave="handleDragLeave($event, 'inside')"
         @drop="handleDrop($event, 'inside')"
       >
-        <span class="tree-kind">{{ node.kind === 'component' ? 'C' : node.kind === 'text' ? 'T' : 'E' }}</span>
+        <span class="tree-kind">
+          <Component v-if="node.kind === 'component'" :size="16" />
+          <Type v-else-if="node.kind === 'text'" :size="16" />
+          <CodeXml v-else :size="16" />
+        </span>
         <span class="tree-label">{{ node.kind === 'text' ? `“${node.label}”` : node.label }}</span>
         <span v-if="!node.editable" class="lock-mark">Locked</span>
       </button>
