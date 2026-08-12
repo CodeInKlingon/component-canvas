@@ -26,7 +26,7 @@ import FeatureCard from '../components/FeatureCard.vue'
     </section>
 
     <section class="features">
-      <FeatureCard v-for="(number, index) in 5" :number="index.toString()" title="Start with intent">Turn rough thinking into a shared direction before the details take over.
+      <FeatureCard v-for="(number, index) in 3" :number="index.toString()" title="Start with intent">Turn rough thinking into a shared direction before the details take over.
       </FeatureCard>
     </section>
   </main>

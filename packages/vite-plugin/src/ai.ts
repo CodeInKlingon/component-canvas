@@ -1,5 +1,5 @@
 import { Agent } from '@cursor/sdk'
-import type { DesignerAiRequest } from '../../shared/src/index.ts'
+import type { DesignerAiRequest } from '@vue-designer/shared'
 
 export interface CursorAiOptions {
   apiKey?: string
