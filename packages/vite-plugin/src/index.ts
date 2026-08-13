@@ -338,12 +338,20 @@ document.addEventListener('click', (event) => {
 }, true)
 document.addEventListener('contextmenu', (event) => {
   const target = event.target instanceof Element ? event.target.closest('[data-vue-designer-id]') : null
-  const nodeId = target?.getAttribute('data-vue-designer-id')
+  let nodeId = target?.getAttribute('data-vue-designer-id')
+  if (!nodeId && selected) {
+    const rect = selected.getBoundingClientRect()
+    if (event.clientX >= rect.left && event.clientX <= rect.right
+      && event.clientY >= rect.top && event.clientY <= rect.bottom) {
+      nodeId = selected.getAttribute('data-vue-designer-id')
+    }
+  }
   if (!nodeId) return
   event.preventDefault()
   event.stopPropagation()
-  send({ type: 'context-menu', nodeId, clientX: event.clientX, clientY: event.clientY })
   select(nodeId)
+  send({ type: 'select', nodeId })
+  send({ type: 'context-menu', nodeId, clientX: event.clientX, clientY: event.clientY })
 }, true)
 addEventListener('message', (event) => {
   const message = event.data

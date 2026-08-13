@@ -326,6 +326,14 @@ function duplicateContextNode(): void {
   if (node?.editable) void applyOperation({ type: 'duplicate-node', nodeId: node.id })
 }
 
+function removeContextNode(): void {
+  const node = findNode(activeDocument.value?.tree ?? [], contextMenu.value?.nodeId ?? null)
+  if (!node?.editable || !window.confirm(`Delete ${node.label}?`)) return
+  closeContextMenu()
+  selectedNodeId.value = null
+  void applyOperation({ type: 'remove-node', nodeId: node.id })
+}
+
 function removeSelectedNode(): void {
   const node = selectedNode.value
   if (!node?.editable || !window.confirm(`Delete ${node.label}?`)) return
@@ -1099,11 +1107,13 @@ onUnmounted(() => {
       :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
       @pointerdown.stop
     >
-      <button role="menuitem" @click="copyContextNode">Copy</button>
-      <button role="menuitem" @click="duplicateContextNode">Duplicate</button>
-      <hr />
-      <button role="menuitem" :disabled="!canContainChildren(selectedNode)" @click="pasteContextNode('inside')">Paste inside</button>
-      <button role="menuitem" @click="pasteContextNode('after')">Paste after</button>
-    </div>
+            <button role="menuitem" @click="copyContextNode">Copy</button>
+            <button role="menuitem" @click="duplicateContextNode">Duplicate</button>
+            <hr />
+            <button role="menuitem" :disabled="!canContainChildren(selectedNode)" @click="pasteContextNode('inside')">Paste inside</button>
+            <button role="menuitem" @click="pasteContextNode('after')">Paste after</button>
+            <hr />
+            <button class="danger" role="menuitem" @click="removeContextNode">Delete</button>
+          </div>
   </div>
 </template>

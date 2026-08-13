@@ -110,6 +110,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .node-context-menu { position: fixed; z-index: 20; width: 176px; display: grid; padding: 5px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--background); box-shadow: 0 12px 32px #0f172a2e; }
 .node-context-menu button { height: 32px; border: 0; border-radius: 5px; background: transparent; padding: 0 9px; text-align: left; }
 .node-context-menu button:hover:not(:disabled) { background: var(--selection-soft); color: var(--selection); }
+.node-context-menu button.danger { color: var(--danger); }
+.node-context-menu button.danger:hover { background: #fef2f2; color: var(--danger); }
 .node-context-menu button:disabled { color: var(--faint); cursor: default; }
 .node-context-menu hr { width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--border); }
 
