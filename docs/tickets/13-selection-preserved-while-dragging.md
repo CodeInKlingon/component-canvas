@@ -1,6 +1,6 @@
 # 13: Selection Preserved While Dragging
 
-**Status:** Planned
+**Status:** complette
 
 ## User Outcome
 

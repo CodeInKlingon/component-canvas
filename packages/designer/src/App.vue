@@ -41,6 +41,7 @@ import SourceEditor from './SourceEditor.vue'
 import { SourceHistory } from './history'
 import { findNode, findNodeAtOffset, findNodeAtPath, findNodePath, findRenderedSelection, reconcileCollapsedTree } from './selection'
 import { nativeElements, type NativeElementMetadata } from './native-elements'
+import { captureDragSelection, findDragSelectionOffset, type DragSelection } from './drag-selection'
 
 type SaveState = 'clean' | 'dirty' | 'saving' | 'conflict'
 
@@ -72,6 +73,8 @@ const computedStyles = ref<Record<string, string>>({})
 const draggedComponent = ref<DesignerComponentMetadata | null>(null)
 const draggedNative = ref<NativeElementMetadata | null>(null)
 const draggedNode = ref<DesignerNode | null>(null)
+const dragSelection = ref<DragSelection | null>(null)
+const droppedSelection = ref<DragSelection | null>(null)
 const externalRevision = ref<string | null>(null)
 const aiEnabled = ref(false)
 const aiPromptOpen = ref(false)
@@ -214,6 +217,7 @@ function startNodeDrag(node: DesignerNode): void {
   draggedComponent.value = null
   draggedNative.value = null
   draggedNode.value = node
+  dragSelection.value = captureDragSelection(selectedNodeId.value, node.id, source.value, node.range)
 }
 
 function startComponentDrag(event: DragEvent, component: DesignerComponentMetadata): void {
@@ -233,9 +237,11 @@ function startNativeDrag(event: DragEvent, element: NativeElementMetadata): void
 }
 
 function endTreeDrag(): void {
+  if (dragSelection.value && !droppedSelection.value) selectedNodeId.value = dragSelection.value.nodeId
   draggedComponent.value = null
   draggedNative.value = null
   draggedNode.value = null
+  dragSelection.value = null
 }
 
 function handleTreeDrop(target: DesignerNode, position: 'before' | 'inside' | 'after'): void {
@@ -245,9 +251,7 @@ function handleTreeDrop(target: DesignerNode, position: 'before' | 'inside' | 'a
     insertNative(draggedNative.value, target)
   } else if (draggedNode.value) {
     const nodeId = draggedNode.value.id
-    selectedNodeId.value = null
-    styleRules.value = []
-    computedStyles.value = {}
+    droppedSelection.value = dragSelection.value
     void applyOperation({ type: 'move-node', nodeId, targetId: target.id, position })
   }
   endTreeDrag()
@@ -304,14 +308,19 @@ async function createCandidate(candidateSource: string): Promise<void> {
   if (!document) return
   previewDiagnostic.value = null
   const selectedPath = findNodePath(document.tree, selectedNodeId.value)
+  const movedSelectionOffset = droppedSelection.value
+    ? findDragSelectionOffset(candidateSource, droppedSelection.value)
+    : null
   if (candidateSource === document.source) {
     const parsed = parseDesignerDocument(candidateSource)
     candidateId.value = null
     activeDocument.value = { ...document, tree: parsed.tree, diagnostics: parsed.diagnostics }
     replaceTree(parsed.tree)
-    selectedNodeId.value = findNode(parsed.tree, selectedNodeId.value)?.id
+    selectedNodeId.value = (movedSelectionOffset === null ? null : findNodeAtOffset(parsed.tree, movedSelectionOffset)?.id)
+      ?? findNode(parsed.tree, selectedNodeId.value)?.id
       ?? findNodeAtPath(parsed.tree, selectedPath)?.id
       ?? null
+    droppedSelection.value = null
     saveState.value = 'clean'
     error.value = ''
     return
@@ -328,12 +337,15 @@ async function createCandidate(candidateSource: string): Promise<void> {
     candidateId.value = result.candidateId
     activeDocument.value = { ...document, tree: result.tree, diagnostics: result.diagnostics }
     replaceTree(result.tree)
-    selectedNodeId.value = findNode(result.tree, selectedNodeId.value)?.id
+    selectedNodeId.value = (movedSelectionOffset === null ? null : findNodeAtOffset(result.tree, movedSelectionOffset)?.id)
+      ?? findNode(result.tree, selectedNodeId.value)?.id
       ?? findNodeAtPath(result.tree, selectedPath)?.id
       ?? null
+    droppedSelection.value = null
     error.value = ''
   } catch (cause) {
     if (request !== candidateRequest) return
+    droppedSelection.value = null
     error.value = cause instanceof Error ? cause.message : 'Unable to preview source'
   }
 }
@@ -589,6 +601,7 @@ function redo(): void {
 }
 
 function selectNode(node: DesignerNode, revealInSource = true): void {
+  if (dragSelection.value && node.id !== dragSelection.value.nodeId) return
   aiPromptOpen.value = false
   selectedNodeId.value = node.id
   activeStyleSelector.value = ''
