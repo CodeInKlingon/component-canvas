@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import {
   Braces,
   ChevronDown,
@@ -7,6 +7,8 @@ import {
   Component,
   FileCode2,
   Layers3,
+  Maximize2,
+  Minus,
   Monitor,
   PanelBottomClose,
   PanelBottomOpen,
@@ -43,6 +45,7 @@ import { findNode, findNodeAtOffset, findNodeAtPath, findNodePath, findRenderedS
 import { nativeElements, type NativeElementMetadata } from './native-elements'
 import { captureDragSelection, findDragSelectionOffset, type DragSelection } from './drag-selection'
 import { nodeClipboardMime, parseNodeClipboard, serializeNodeClipboard, type NodeClipboardPayload } from './node-clipboard'
+import { clampZoom, fitZoom, viewportPresets, zoomAroundPoint, type ViewportMode } from './canvas'
 
 type SaveState = 'clean' | 'dirty' | 'saving' | 'conflict'
 
@@ -54,7 +57,13 @@ const error = ref('')
 const loading = ref(true)
 const saveState = ref<SaveState>('clean')
 const previewVersion = ref(0)
-const viewportWidth = ref<'100%' | '768px' | '390px'>('100%')
+const viewportMode = ref<ViewportMode>('responsive')
+const canvasViewport = ref<HTMLElement | null>(null)
+const canvasSize = ref({ width: 0, height: 0 })
+const canvasPan = ref({ x: 0, y: 0 })
+const canvasZoom = ref(1)
+const isPanning = ref(false)
+const spacePressed = ref(false)
 const previewFrame = ref<HTMLIFrameElement | null>(null)
 const previewOrigin = ref('')
 const previewSession = ref(crypto.randomUUID())
@@ -89,6 +98,9 @@ const history = new SourceHistory()
 let sourcePreviewTimer: number | undefined
 let candidateRequest = 0
 let apiCapability = ''
+let canvasResizeObserver: ResizeObserver | undefined
+let panPointerId: number | undefined
+let panStart = { x: 0, y: 0, panX: 0, panY: 0 }
 
 const selectedNode = computed(() => findNode(activeDocument.value?.tree ?? [], selectedNodeId.value))
 const selectedComponent = computed(() => selectedNode.value?.kind === 'component'
@@ -112,6 +124,18 @@ const styleControls = [
 const dragKind = computed<'component' | 'node' | null>(() => draggedComponent.value || draggedNative.value ? 'component' : draggedNode.value ? 'node' : null)
 const canUndo = computed(() => (historyVersion.value, history.canUndo))
 const canRedo = computed(() => (historyVersion.value, history.canRedo))
+const viewportSize = computed(() => viewportMode.value === 'responsive'
+  ? { width: Math.max(1, canvasSize.value.width), height: Math.max(1, canvasSize.value.height) }
+  : viewportPresets[viewportMode.value])
+const viewportLabel = computed(() => viewportMode.value === 'responsive'
+  ? `Responsive · ${viewportSize.value.width} × ${viewportSize.value.height}`
+  : `${viewportSize.value.width} × ${viewportSize.value.height}`)
+const canvasSceneStyle = computed(() => ({
+  width: `${viewportSize.value.width}px`,
+  height: `${viewportSize.value.height}px`,
+  transform: `translate(${canvasPan.value.x}px, ${canvasPan.value.y}px) scale(${canvasZoom.value})`,
+}))
+const zoomLabel = computed(() => `${Math.round(canvasZoom.value * 100)}%`)
 
 function recordSource(candidateSource: string): void {
   history.push(candidateSource)
@@ -754,6 +778,10 @@ function handleExternalChange(change: DesignerDocumentChangedEvent): void {
 function handlePreviewMessage(event: MessageEvent): void {
   if (event.source !== previewFrame.value?.contentWindow || !isPreviewToEditorMessage(event.data)) return
   if (event.data.session !== previewSession.value) return
+  if (event.data.type === 'pan-key-state') {
+    spacePressed.value = event.data.pressed
+    return
+  }
   if (event.data.type === 'ready') {
     previewFrame.value?.contentWindow?.postMessage({
       channel: 'vue-designer',
@@ -783,8 +811,8 @@ function handlePreviewMessage(event: MessageEvent): void {
     if (event.data.type === 'context-menu') {
       const frame = previewFrame.value?.getBoundingClientRect()
       if (frame) openContextMenu(new MouseEvent('contextmenu', {
-        clientX: frame.left + event.data.clientX,
-        clientY: frame.top + event.data.clientY,
+        clientX: frame.left + event.data.clientX * canvasZoom.value,
+        clientY: frame.top + event.data.clientY * canvasZoom.value,
       }), node)
       return
     }
@@ -794,16 +822,94 @@ function handlePreviewMessage(event: MessageEvent): void {
 }
 
 function reloadPreview(): void {
+  spacePressed.value = false
+  isPanning.value = false
   previewDiagnostic.value = null
   previewSession.value = crypto.randomUUID()
   previewVersion.value += 1
 }
 
 function handlePreviewLoad(): void {
+  spacePressed.value = false
+  isPanning.value = false
   // Selection and viewport restoration wait for the preview's ready handshake.
 }
 
+function centerCanvas(zoom = canvasZoom.value): void {
+  const viewport = canvasViewport.value
+  if (!viewport) return
+  canvasPan.value = {
+    x: (viewport.clientWidth - viewportSize.value.width * zoom) / 2,
+    y: (viewport.clientHeight - viewportSize.value.height * zoom) / 2,
+  }
+}
+
+function setViewportMode(mode: ViewportMode): void {
+  viewportMode.value = mode
+  void nextTick(() => {
+    if (mode === 'responsive') {
+      canvasZoom.value = 1
+      canvasPan.value = { x: 0, y: 0 }
+    } else {
+      fitCanvas()
+    }
+  })
+}
+
+function setCanvasZoom(zoom: number, point?: { x: number; y: number }): void {
+  const nextZoom = clampZoom(zoom)
+  const viewport = canvasViewport.value
+  if (!viewport || viewportMode.value === 'responsive') return
+  const anchor = point ?? { x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 }
+  canvasPan.value = zoomAroundPoint(canvasPan.value, anchor, canvasZoom.value, nextZoom)
+  canvasZoom.value = nextZoom
+}
+
+function fitCanvas(): void {
+  if (viewportMode.value === 'responsive') return
+  canvasZoom.value = fitZoom(canvasSize.value, viewportSize.value)
+  centerCanvas(canvasZoom.value)
+}
+
+function handleCanvasWheel(event: WheelEvent): void {
+  if (!(event.ctrlKey || event.metaKey) || viewportMode.value === 'responsive') return
+  event.preventDefault()
+  const bounds = canvasViewport.value?.getBoundingClientRect()
+  if (!bounds) return
+  const point = { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
+  setCanvasZoom(canvasZoom.value * Math.exp(-event.deltaY * 0.002), point)
+}
+
+function startCanvasPan(event: PointerEvent): void {
+  if (viewportMode.value === 'responsive' || (event.button !== 1 && !(event.button === 0 && spacePressed.value))) return
+  event.preventDefault()
+  isPanning.value = true
+  panPointerId = event.pointerId
+  panStart = { x: event.clientX, y: event.clientY, panX: canvasPan.value.x, panY: canvasPan.value.y }
+  canvasViewport.value?.setPointerCapture(event.pointerId)
+}
+
+function moveCanvasPan(event: PointerEvent): void {
+  if (!isPanning.value || event.pointerId !== panPointerId) return
+  canvasPan.value = {
+    x: panStart.panX + event.clientX - panStart.x,
+    y: panStart.panY + event.clientY - panStart.y,
+  }
+}
+
+function stopCanvasPan(event: PointerEvent): void {
+  if (event.pointerId !== panPointerId) return
+  isPanning.value = false
+  panPointerId = undefined
+}
+
 function handleShortcut(event: KeyboardEvent): void {
+  const target = event.target as HTMLElement | null
+  const isEditing = target?.matches('input, textarea, select, [contenteditable="true"]') ?? false
+  if (event.code === 'Space' && !isEditing) {
+    spacePressed.value = true
+    event.preventDefault()
+  }
   if (event.key === 'Escape') closeContextMenu()
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
     event.preventDefault()
@@ -815,22 +921,45 @@ function handleShortcut(event: KeyboardEvent): void {
   } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') {
     event.preventDefault()
     redo()
+  } else if (!isEditing && (event.ctrlKey || event.metaKey) && (event.key === '+' || event.key === '=')) {
+    event.preventDefault()
+    setCanvasZoom(canvasZoom.value * 1.2)
+  } else if (!isEditing && (event.ctrlKey || event.metaKey) && event.key === '-') {
+    event.preventDefault()
+    setCanvasZoom(canvasZoom.value / 1.2)
+  } else if (!isEditing && (event.ctrlKey || event.metaKey) && event.key === '0') {
+    event.preventDefault()
+    setCanvasZoom(1)
   }
+}
+
+function handleKeyUp(event: KeyboardEvent): void {
+  if (event.code === 'Space') spacePressed.value = false
 }
 
 import.meta.hot?.on('vue-designer:document-changed', handleExternalChange)
 
 onMounted(() => {
   window.addEventListener('keydown', handleShortcut)
+  window.addEventListener('keyup', handleKeyUp)
   window.addEventListener('message', handlePreviewMessage)
   window.addEventListener('pointerdown', closeContextMenu)
+  canvasResizeObserver = new ResizeObserver(([entry]) => {
+    if (!entry) return
+    const { width, height } = entry.contentRect
+    canvasSize.value = { width: Math.floor(width), height: Math.floor(height) }
+    if (viewportMode.value === 'responsive') canvasPan.value = { x: 0, y: 0 }
+  })
+  if (canvasViewport.value) canvasResizeObserver.observe(canvasViewport.value)
   void loadDocuments()
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleShortcut)
+  window.removeEventListener('keyup', handleKeyUp)
   window.removeEventListener('message', handlePreviewMessage)
   window.removeEventListener('pointerdown', closeContextMenu)
+  canvasResizeObserver?.disconnect()
   window.clearTimeout(sourcePreviewTimer)
   import.meta.hot?.off('vue-designer:document-changed', handleExternalChange)
 })
@@ -850,13 +979,16 @@ onUnmounted(() => {
       </div>
       <div class="actions">
         <div class="viewport-switcher" aria-label="Preview viewport">
-          <button :class="{ active: viewportWidth === '100%' }" title="Desktop viewport" @click="viewportWidth = '100%'">
+          <button :class="{ active: viewportMode === 'responsive' }" title="Responsive viewport" @click="setViewportMode('responsive')">
+            <Maximize2 :size="14" /><span>Responsive</span>
+          </button>
+          <button :class="{ active: viewportMode === 'desktop' }" title="Desktop viewport (1440 × 900)" @click="setViewportMode('desktop')">
             <Monitor :size="14" /><span>Desktop</span>
           </button>
-          <button :class="{ active: viewportWidth === '768px' }" title="Tablet viewport" @click="viewportWidth = '768px'">
+          <button :class="{ active: viewportMode === 'tablet' }" title="Tablet viewport (768 × 1024)" @click="setViewportMode('tablet')">
             <Tablet :size="14" /><span>Tablet</span>
           </button>
-          <button :class="{ active: viewportWidth === '390px' }" title="Mobile viewport" @click="viewportWidth = '390px'">
+          <button :class="{ active: viewportMode === 'mobile' }" title="Mobile viewport (390 × 844)" @click="setViewportMode('mobile')">
             <Smartphone :size="14" /><span>Mobile</span>
           </button>
         </div>
@@ -933,12 +1065,32 @@ onUnmounted(() => {
 
       <div class="center-workspace" :class="{ 'source-collapsed': !sourceOpen }">
         <section class="canvas-panel">
-          <div class="canvas-label">Canvas <span>{{ viewportWidth }}</span></div>
-          <div class="canvas-scroll">
-            <div class="preview-frame" :style="{ width: viewportWidth }">
-              <iframe v-if="previewUrl" ref="previewFrame" :key="previewUrl" :src="previewUrl" sandbox="allow-scripts" title="Vue document preview" @load="handlePreviewLoad" />
-              <div v-else class="preview-empty">Select a document to begin.</div>
+          <div class="canvas-label">
+            <span>Canvas · {{ viewportLabel }}</span>
+            <div class="canvas-zoom" aria-label="Canvas zoom">
+              <button :disabled="viewportMode === 'responsive'" title="Zoom out" aria-label="Zoom out" @click="setCanvasZoom(canvasZoom / 1.2)"><Minus :size="13" /></button>
+              <button :disabled="viewportMode === 'responsive'" title="Reset zoom to 100%" @click="setCanvasZoom(1)">{{ zoomLabel }}</button>
+              <button :disabled="viewportMode === 'responsive'" title="Zoom in" aria-label="Zoom in" @click="setCanvasZoom(canvasZoom * 1.2)"><Plus :size="13" /></button>
+              <button :disabled="viewportMode === 'responsive'" title="Fit viewport" aria-label="Fit viewport" @click="fitCanvas"><Maximize2 :size="13" /></button>
             </div>
+          </div>
+          <div
+            ref="canvasViewport"
+            class="canvas-viewport"
+            :class="{ 'pan-ready': spacePressed && viewportMode !== 'responsive', panning: isPanning }"
+            @wheel="handleCanvasWheel"
+            @pointerdown="startCanvasPan"
+            @pointermove="moveCanvasPan"
+            @pointerup="stopCanvasPan"
+            @pointercancel="stopCanvasPan"
+          >
+            <div class="canvas-scene" :style="canvasSceneStyle">
+              <div class="preview-frame">
+                <iframe v-if="previewUrl" ref="previewFrame" :key="previewUrl" :src="previewUrl" sandbox="allow-scripts" title="Vue document preview" @load="handlePreviewLoad" />
+                <div v-else class="preview-empty">Select a document to begin.</div>
+              </div>
+            </div>
+            <div v-if="spacePressed && viewportMode !== 'responsive'" class="canvas-pan-capture" />
           </div>
           <form v-if="aiPromptOpen && selectedNode" class="ai-prompt" @submit.prevent="runAiEdit">
             <div class="ai-prompt-heading"><Sparkles :size="15" /><strong>Edit {{ selectedNode.label }} with AI</strong></div>

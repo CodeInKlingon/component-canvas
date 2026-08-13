@@ -163,6 +163,7 @@ export function isVoidElement(tag: string): boolean {
 
 export type PreviewToEditorMessage =
   | { channel: 'vue-designer'; session: string; type: 'ready' }
+  | { channel: 'vue-designer'; session: string; type: 'pan-key-state'; pressed: boolean }
   | { channel: 'vue-designer'; session: string; type: 'viewport-state'; scrollX: number; scrollY: number }
   | { channel: 'vue-designer'; session: string; type: 'select'; nodeId: string }
   | { channel: 'vue-designer'; session: string; type: 'ai-prompt'; nodeId: string }
@@ -180,6 +181,7 @@ export function isPreviewToEditorMessage(value: unknown): value is PreviewToEdit
   const message = value as Record<string, unknown>
   if (message.channel !== 'vue-designer' || typeof message.session !== 'string') return false
   if (message.type === 'ready') return true
+  if (message.type === 'pan-key-state') return typeof message.pressed === 'boolean'
   if (message.type === 'viewport-state') return typeof message.scrollX === 'number' && Number.isFinite(message.scrollX)
     && typeof message.scrollY === 'number' && Number.isFinite(message.scrollY)
   if (message.type === 'diagnostic') {

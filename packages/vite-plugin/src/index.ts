@@ -231,6 +231,27 @@ const describe = (value) => value instanceof Error
   ? { message: value.message, stack: value.stack }
   : { message: typeof value === 'string' ? value : JSON.stringify(value) }
 
+let panKeyPressed = false
+const isKeyboardTarget = (target) => target instanceof Element
+  && ((target instanceof HTMLElement && target.isContentEditable)
+    || !!target.closest('input, textarea, select, button, a[href], summary, [role="button"]'))
+const setPanKeyPressed = (pressed) => {
+  if (panKeyPressed === pressed) return
+  panKeyPressed = pressed
+  send({ type: 'pan-key-state', pressed })
+}
+document.addEventListener('keydown', (event) => {
+  if (event.code !== 'Space' || isKeyboardTarget(event.target)) return
+  event.preventDefault()
+  setPanKeyPressed(true)
+}, true)
+document.addEventListener('keyup', (event) => {
+  if (event.code !== 'Space' || !panKeyPressed) return
+  event.preventDefault()
+  setPanKeyPressed(false)
+}, true)
+addEventListener('blur', () => setPanKeyPressed(false))
+
 addEventListener('error', (event) => send({ type: 'diagnostic', level: 'error', ...describe(event.error ?? event.message) }))
 addEventListener('unhandledrejection', (event) => send({ type: 'diagnostic', level: 'error', ...describe(event.reason) }))
 for (const level of ['warn', 'error']) {

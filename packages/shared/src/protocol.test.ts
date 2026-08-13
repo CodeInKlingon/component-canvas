@@ -19,6 +19,11 @@ describe('preview protocol validation', () => {
     expect(isEditorToPreviewMessage({ channel: 'vue-designer', session: 'session', type: 'restore-viewport', scrollX: 4, scrollY: 120 })).toBe(true)
   })
 
+  it('validates preview pan key state', () => {
+    expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'pan-key-state', pressed: true })).toBe(true)
+    expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'pan-key-state', pressed: 'true' })).toBe(false)
+  })
+
   it('accepts AI prompt actions only for a selected node', () => {
     expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'ai-prompt', nodeId: 'node-1' })).toBe(true)
     expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'ai-prompt', nodeId: null })).toBe(false)
