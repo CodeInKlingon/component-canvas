@@ -22,6 +22,7 @@ These tickets are ordered by dependency. Each slice must leave the designer in a
 | [13](13-selection-preserved-while-dragging.md) | Selection preserved while dragging | Dragging nodes keeps the intended selection stable |
 | [14](14-copy-paste-and-duplicate-context-menus.md) | Copy, paste, and duplicate context menus | Tree and canvas context menus support clipboard workflows |
 | [15](15-props-inspector-complex-values.md) | Props inspector complex values | Array, object, and expression props render with appropriate controls |
+| [16](16-framework-support-extraction.md) | Framework support extraction | Vue document support becomes an imported framework option, leaving reusable designer and Vite infrastructure ready for future adapters |
 
 ## Working Agreement
 
