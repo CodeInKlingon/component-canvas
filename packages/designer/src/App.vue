@@ -7,6 +7,7 @@ import {
   Component,
   FileCode2,
   Layers3,
+  MousePointer2,
   Maximize2,
   Minus,
   Monitor,
@@ -62,6 +63,8 @@ const canvasViewport = ref<HTMLElement | null>(null)
 const canvasSize = ref({ width: 0, height: 0 })
 const canvasPan = ref({ x: 0, y: 0 })
 const canvasZoom = ref(1)
+const canvasOwnsInput = ref(true)
+const isWheelPanning = ref(false)
 const isPanning = ref(false)
 const spacePressed = ref(false)
 const previewFrame = ref<HTMLIFrameElement | null>(null)
@@ -101,6 +104,8 @@ let apiCapability = ''
 let canvasResizeObserver: ResizeObserver | undefined
 let panPointerId: number | undefined
 let panStart = { x: 0, y: 0, panX: 0, panY: 0 }
+let wheelPanActiveUntil = 0
+let wheelPanTimer: number | undefined
 
 const selectedNode = computed(() => findNode(activeDocument.value?.tree ?? [], selectedNodeId.value))
 const selectedComponent = computed(() => selectedNode.value?.kind === 'component'
@@ -782,6 +787,22 @@ function handlePreviewMessage(event: MessageEvent): void {
     spacePressed.value = event.data.pressed
     return
   }
+  if (event.data.type === 'canvas-wheel') {
+    if (event.data.zoom) {
+      const viewportBounds = canvasViewport.value?.getBoundingClientRect()
+      const frameBounds = previewFrame.value?.getBoundingClientRect()
+      if (viewportBounds && frameBounds) {
+        setCanvasZoom(canvasZoom.value * Math.exp(-event.data.deltaY * 0.002), {
+          x: frameBounds.left - viewportBounds.left + event.data.clientX * canvasZoom.value,
+          y: frameBounds.top - viewportBounds.top + event.data.clientY * canvasZoom.value,
+        })
+      }
+    } else {
+      continueWheelPanGesture()
+      panCanvasByWheel(event.data.deltaX, event.data.deltaY)
+    }
+    return
+  }
   if (event.data.type === 'ready') {
     previewFrame.value?.contentWindow?.postMessage({
       channel: 'vue-designer',
@@ -790,6 +811,7 @@ function handlePreviewMessage(event: MessageEvent): void {
       scrollX: previewScroll.value.x,
       scrollY: previewScroll.value.y,
     }, '*')
+    syncCanvasInputMode()
     const node = selectedNode.value
     if (node) selectNode(node, false)
     return
@@ -846,6 +868,7 @@ function centerCanvas(zoom = canvasZoom.value): void {
 
 function setViewportMode(mode: ViewportMode): void {
   viewportMode.value = mode
+  syncCanvasInputMode(mode)
   void nextTick(() => {
     if (mode === 'responsive') {
       canvasZoom.value = 1
@@ -854,6 +877,59 @@ function setViewportMode(mode: ViewportMode): void {
       fitCanvas()
     }
   })
+}
+
+function syncCanvasInputMode(mode = viewportMode.value): void {
+  previewFrame.value?.contentWindow?.postMessage({
+    channel: 'vue-designer',
+    session: previewSession.value,
+    type: 'canvas-input-mode',
+    enabled: canvasOwnsInput.value && mode !== 'responsive',
+    selectionEnabled: canvasOwnsInput.value || mode === 'responsive',
+  }, '*')
+}
+
+function toggleCanvasInputMode(): void {
+  canvasOwnsInput.value = !canvasOwnsInput.value
+  if (!canvasOwnsInput.value) {
+    isWheelPanning.value = false
+    window.clearTimeout(wheelPanTimer)
+  }
+  syncCanvasInputMode()
+}
+
+function panCanvasByWheel(deltaX: number, deltaY: number): void {
+  if (!canvasOwnsInput.value || viewportMode.value === 'responsive') return
+  canvasPan.value = {
+    x: canvasPan.value.x - deltaX,
+    y: canvasPan.value.y - deltaY,
+  }
+}
+
+function continueWheelPanGesture(): void {
+  wheelPanActiveUntil = performance.now() + 300
+  isWheelPanning.value = true
+  window.clearTimeout(wheelPanTimer)
+  wheelPanTimer = window.setTimeout(() => {
+    isWheelPanning.value = false
+  }, 300)
+}
+
+function wheelDeltaScale(event: WheelEvent): number {
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return 16
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return canvasViewport.value?.clientHeight ?? 1
+  return 1
+}
+
+function continueCanvasWheelOutsideViewport(event: WheelEvent): void {
+  const target = event.target
+  const insideViewport = target instanceof Node && !!canvasViewport.value?.contains(target)
+  if (insideViewport) return
+  if (!canvasOwnsInput.value || viewportMode.value === 'responsive' || performance.now() > wheelPanActiveUntil) return
+  event.preventDefault()
+  const scale = wheelDeltaScale(event)
+  panCanvasByWheel(event.deltaX * scale, event.deltaY * scale)
+  continueWheelPanGesture()
 }
 
 function setCanvasZoom(zoom: number, point?: { x: number; y: number }): void {
@@ -872,21 +948,31 @@ function fitCanvas(): void {
 }
 
 function handleCanvasWheel(event: WheelEvent): void {
-  if (!(event.ctrlKey || event.metaKey) || viewportMode.value === 'responsive') return
+  if (viewportMode.value === 'responsive') return
+  const scale = wheelDeltaScale(event)
+  if (event.ctrlKey || event.metaKey) {
+    event.preventDefault()
+    const bounds = canvasViewport.value?.getBoundingClientRect()
+    if (!bounds) return
+    const point = { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
+    setCanvasZoom(canvasZoom.value * Math.exp(-event.deltaY * scale * 0.002), point)
+    return
+  }
+  if (!canvasOwnsInput.value) return
   event.preventDefault()
-  const bounds = canvasViewport.value?.getBoundingClientRect()
-  if (!bounds) return
-  const point = { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
-  setCanvasZoom(canvasZoom.value * Math.exp(-event.deltaY * 0.002), point)
+  continueWheelPanGesture()
+  panCanvasByWheel(event.deltaX * scale, event.deltaY * scale)
 }
 
 function startCanvasPan(event: PointerEvent): void {
-  if (viewportMode.value === 'responsive' || (event.button !== 1 && !(event.button === 0 && spacePressed.value))) return
+  const accepted = viewportMode.value !== 'responsive'
+    && (event.button === 1 || (event.button === 0 && spacePressed.value))
+  if (!accepted) return
   event.preventDefault()
   isPanning.value = true
   panPointerId = event.pointerId
   panStart = { x: event.clientX, y: event.clientY, panX: canvasPan.value.x, panY: canvasPan.value.y }
-  canvasViewport.value?.setPointerCapture(event.pointerId)
+  if (event.isTrusted) canvasViewport.value?.setPointerCapture(event.pointerId)
 }
 
 function moveCanvasPan(event: PointerEvent): void {
@@ -901,6 +987,18 @@ function stopCanvasPan(event: PointerEvent): void {
   if (event.pointerId !== panPointerId) return
   isPanning.value = false
   panPointerId = undefined
+}
+
+function selectCanvasPoint(event: MouseEvent): void {
+  const frameBounds = previewFrame.value?.getBoundingClientRect()
+  if (!frameBounds) return
+  previewFrame.value?.contentWindow?.postMessage({
+    channel: 'vue-designer',
+    session: previewSession.value,
+    type: 'select-at-point',
+    clientX: (event.clientX - frameBounds.left) / canvasZoom.value,
+    clientY: (event.clientY - frameBounds.top) / canvasZoom.value,
+  }, '*')
 }
 
 function handleShortcut(event: KeyboardEvent): void {
@@ -943,6 +1041,7 @@ onMounted(() => {
   window.addEventListener('keydown', handleShortcut)
   window.addEventListener('keyup', handleKeyUp)
   window.addEventListener('message', handlePreviewMessage)
+  window.addEventListener('wheel', continueCanvasWheelOutsideViewport, { capture: true, passive: false })
   window.addEventListener('pointerdown', closeContextMenu)
   canvasResizeObserver = new ResizeObserver(([entry]) => {
     if (!entry) return
@@ -958,9 +1057,11 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleShortcut)
   window.removeEventListener('keyup', handleKeyUp)
   window.removeEventListener('message', handlePreviewMessage)
+  window.removeEventListener('wheel', continueCanvasWheelOutsideViewport, { capture: true })
   window.removeEventListener('pointerdown', closeContextMenu)
   canvasResizeObserver?.disconnect()
   window.clearTimeout(sourcePreviewTimer)
+  window.clearTimeout(wheelPanTimer)
   import.meta.hot?.off('vue-designer:document-changed', handleExternalChange)
 })
 </script>
@@ -1073,6 +1174,19 @@ onUnmounted(() => {
               <button :disabled="viewportMode === 'responsive'" title="Zoom in" aria-label="Zoom in" @click="setCanvasZoom(canvasZoom * 1.2)"><Plus :size="13" /></button>
               <button :disabled="viewportMode === 'responsive'" title="Fit viewport" aria-label="Fit viewport" @click="fitCanvas"><Maximize2 :size="13" /></button>
             </div>
+            <button
+              class="canvas-scroll-toggle"
+              :class="{ active: canvasOwnsInput }"
+              :disabled="viewportMode === 'responsive'"
+              :aria-pressed="canvasOwnsInput"
+              :title="viewportMode === 'responsive'
+                ? 'Input routing is unavailable in responsive view'
+                : canvasOwnsInput ? 'Canvas receives input; click selects and drag pans' : 'Preview receives input'"
+              @click="toggleCanvasInputMode"
+            >
+              <MousePointer2 :size="13" />
+              {{ canvasOwnsInput ? 'Canvas' : 'Preview' }}
+            </button>
           </div>
           <div
             ref="canvasViewport"
@@ -1091,6 +1205,7 @@ onUnmounted(() => {
               </div>
             </div>
             <div v-if="spacePressed && viewportMode !== 'responsive'" class="canvas-pan-capture" />
+            <div v-if="canvasOwnsInput && viewportMode !== 'responsive'" class="canvas-input-capture" @click="selectCanvasPoint" />
           </div>
           <form v-if="aiPromptOpen && selectedNode" class="ai-prompt" @submit.prevent="runAiEdit">
             <div class="ai-prompt-heading"><Sparkles :size="15" /><strong>Edit {{ selectedNode.label }} with AI</strong></div>

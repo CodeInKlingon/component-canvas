@@ -232,6 +232,8 @@ const describe = (value) => value instanceof Error
   : { message: typeof value === 'string' ? value : JSON.stringify(value) }
 
 let panKeyPressed = false
+let canvasInputMode = false
+let selectionEnabled = true
 const isKeyboardTarget = (target) => target instanceof Element
   && ((target instanceof HTMLElement && target.isContentEditable)
     || !!target.closest('input, textarea, select, button, a[href], summary, [role="button"]'))
@@ -251,6 +253,23 @@ document.addEventListener('keyup', (event) => {
   setPanKeyPressed(false)
 }, true)
 addEventListener('blur', () => setPanKeyPressed(false))
+document.addEventListener('wheel', (event) => {
+  if (!canvasInputMode) return
+  event.preventDefault()
+  const scale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+    ? 16
+    : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+      ? innerHeight
+      : 1
+  send({
+    type: 'canvas-wheel',
+    deltaX: event.deltaX * scale,
+    deltaY: event.deltaY * scale,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    zoom: event.ctrlKey || event.metaKey,
+  })
+}, { capture: true, passive: false })
 
 addEventListener('error', (event) => send({ type: 'diagnostic', level: 'error', ...describe(event.error ?? event.message) }))
 addEventListener('unhandledrejection', (event) => send({ type: 'diagnostic', level: 'error', ...describe(event.reason) }))
@@ -349,6 +368,7 @@ function select(nodeId) {
   }
 }
 document.addEventListener('click', (event) => {
+  if (!selectionEnabled) return
   const target = event.target instanceof Element ? event.target.closest('[data-vue-designer-id]') : null
   const nodeId = target?.getAttribute('data-vue-designer-id')
   if (!nodeId) return
@@ -358,6 +378,7 @@ document.addEventListener('click', (event) => {
   select(nodeId)
 }, true)
 document.addEventListener('contextmenu', (event) => {
+  if (!selectionEnabled) return
   const target = event.target instanceof Element ? event.target.closest('[data-vue-designer-id]') : null
   let nodeId = target?.getAttribute('data-vue-designer-id')
   if (!nodeId && selected) {
@@ -378,6 +399,19 @@ addEventListener('message', (event) => {
   const message = event.data
   if (message?.channel !== 'vue-designer' || message.session !== session) return
   if (message.type === 'select' && (message.nodeId === null || typeof message.nodeId === 'string')) select(message.nodeId)
+  if (message.type === 'canvas-input-mode' && typeof message.enabled === 'boolean' && typeof message.selectionEnabled === 'boolean') {
+    canvasInputMode = message.enabled
+    selectionEnabled = message.selectionEnabled
+  }
+  if (message.type === 'select-at-point' && Number.isFinite(message.clientX) && Number.isFinite(message.clientY)) {
+    if (!selectionEnabled) return
+    const target = document.elementFromPoint(message.clientX, message.clientY)?.closest('[data-vue-designer-id]')
+    const nodeId = target?.getAttribute('data-vue-designer-id')
+    if (nodeId) {
+      send({ type: 'select', nodeId })
+      select(nodeId)
+    }
+  }
   if (message.type === 'restore-viewport' && Number.isFinite(message.scrollX) && Number.isFinite(message.scrollY)) {
     requestAnimationFrame(() => scrollTo(message.scrollX, message.scrollY))
   }

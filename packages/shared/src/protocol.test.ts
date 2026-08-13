@@ -24,6 +24,15 @@ describe('preview protocol validation', () => {
     expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'pan-key-state', pressed: 'true' })).toBe(false)
   })
 
+  it('validates canvas scroll routing messages', () => {
+    expect(isEditorToPreviewMessage({ channel: 'vue-designer', session: 'session', type: 'canvas-input-mode', enabled: true, selectionEnabled: true })).toBe(true)
+    expect(isEditorToPreviewMessage({ channel: 'vue-designer', session: 'session', type: 'canvas-input-mode', enabled: true, selectionEnabled: 'true' })).toBe(false)
+    expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'canvas-wheel', deltaX: 4, deltaY: -12, clientX: 10, clientY: 20, zoom: false })).toBe(true)
+    expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'canvas-wheel', deltaX: 0, deltaY: Infinity, clientX: 10, clientY: 20, zoom: false })).toBe(false)
+    expect(isEditorToPreviewMessage({ channel: 'vue-designer', session: 'session', type: 'select-at-point', clientX: 10, clientY: 20 })).toBe(true)
+    expect(isEditorToPreviewMessage({ channel: 'vue-designer', session: 'session', type: 'select-at-point', clientX: Infinity, clientY: 20 })).toBe(false)
+  })
+
   it('accepts AI prompt actions only for a selected node', () => {
     expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'ai-prompt', nodeId: 'node-1' })).toBe(true)
     expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'ai-prompt', nodeId: null })).toBe(false)

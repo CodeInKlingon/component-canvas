@@ -164,6 +164,7 @@ export function isVoidElement(tag: string): boolean {
 export type PreviewToEditorMessage =
   | { channel: 'vue-designer'; session: string; type: 'ready' }
   | { channel: 'vue-designer'; session: string; type: 'pan-key-state'; pressed: boolean }
+  | { channel: 'vue-designer'; session: string; type: 'canvas-wheel'; deltaX: number; deltaY: number; clientX: number; clientY: number; zoom: boolean }
   | { channel: 'vue-designer'; session: string; type: 'viewport-state'; scrollX: number; scrollY: number }
   | { channel: 'vue-designer'; session: string; type: 'select'; nodeId: string }
   | { channel: 'vue-designer'; session: string; type: 'ai-prompt'; nodeId: string }
@@ -173,6 +174,8 @@ export type PreviewToEditorMessage =
 
 export type EditorToPreviewMessage =
   | { channel: 'vue-designer'; session: string; type: 'select'; nodeId: string | null }
+  | { channel: 'vue-designer'; session: string; type: 'canvas-input-mode'; enabled: boolean; selectionEnabled: boolean }
+  | { channel: 'vue-designer'; session: string; type: 'select-at-point'; clientX: number; clientY: number }
   | { channel: 'vue-designer'; session: string; type: 'restore-viewport'; scrollX: number; scrollY: number }
   | { channel: 'vue-designer'; session: string; type: 'apply-style'; nodeId: string; property: string; value: string | null }
 
@@ -182,6 +185,11 @@ export function isPreviewToEditorMessage(value: unknown): value is PreviewToEdit
   if (message.channel !== 'vue-designer' || typeof message.session !== 'string') return false
   if (message.type === 'ready') return true
   if (message.type === 'pan-key-state') return typeof message.pressed === 'boolean'
+  if (message.type === 'canvas-wheel') return typeof message.deltaX === 'number' && Number.isFinite(message.deltaX)
+    && typeof message.deltaY === 'number' && Number.isFinite(message.deltaY)
+    && typeof message.clientX === 'number' && Number.isFinite(message.clientX)
+    && typeof message.clientY === 'number' && Number.isFinite(message.clientY)
+    && typeof message.zoom === 'boolean'
   if (message.type === 'viewport-state') return typeof message.scrollX === 'number' && Number.isFinite(message.scrollX)
     && typeof message.scrollY === 'number' && Number.isFinite(message.scrollY)
   if (message.type === 'diagnostic') {
@@ -200,6 +208,10 @@ export function isEditorToPreviewMessage(value: unknown): value is EditorToPrevi
   const message = value as Record<string, unknown>
   if (message.channel !== 'vue-designer' || typeof message.session !== 'string') return false
   if (message.type === 'select') return message.nodeId === null || typeof message.nodeId === 'string'
+  if (message.type === 'canvas-input-mode') return typeof message.enabled === 'boolean'
+    && typeof message.selectionEnabled === 'boolean'
+  if (message.type === 'select-at-point') return typeof message.clientX === 'number' && Number.isFinite(message.clientX)
+    && typeof message.clientY === 'number' && Number.isFinite(message.clientY)
   if (message.type === 'restore-viewport') return typeof message.scrollX === 'number' && Number.isFinite(message.scrollX)
     && typeof message.scrollY === 'number' && Number.isFinite(message.scrollY)
   return message.type === 'apply-style' && typeof message.nodeId === 'string'
