@@ -147,6 +147,7 @@ export type DesignerSourceOperation =
     }
   | { type: 'remove-node'; nodeId: string }
   | { type: 'duplicate-node'; nodeId: string }
+  | { type: 'insert-node'; targetId: string; position: 'inside' | 'after'; source: string }
   | {
       type: 'move-node'
       nodeId: string
@@ -165,6 +166,7 @@ export type PreviewToEditorMessage =
   | { channel: 'vue-designer'; session: string; type: 'viewport-state'; scrollX: number; scrollY: number }
   | { channel: 'vue-designer'; session: string; type: 'select'; nodeId: string }
   | { channel: 'vue-designer'; session: string; type: 'ai-prompt'; nodeId: string }
+  | { channel: 'vue-designer'; session: string; type: 'context-menu'; nodeId: string; clientX: number; clientY: number }
   | { channel: 'vue-designer'; session: string; type: 'computed-style'; nodeId: string; styles: Record<string, string> }
   | { channel: 'vue-designer'; session: string; type: 'diagnostic'; level: 'error' | 'warning' | 'info'; message: string; stack?: string }
 
@@ -186,6 +188,8 @@ export function isPreviewToEditorMessage(value: unknown): value is PreviewToEdit
   }
   if (typeof message.nodeId !== 'string') return false
   if (message.type === 'select' || message.type === 'ai-prompt') return true
+  if (message.type === 'context-menu') return typeof message.clientX === 'number' && Number.isFinite(message.clientX)
+    && typeof message.clientY === 'number' && Number.isFinite(message.clientY)
   return message.type === 'computed-style' && !!message.styles && typeof message.styles === 'object'
 }
 
@@ -200,4 +204,4 @@ export function isEditorToPreviewMessage(value: unknown): value is EditorToPrevi
     && typeof message.property === 'string' && (message.value === null || typeof message.value === 'string')
 }
 
-export { applySourceOperation, instrumentDesignerNodes, parseDesignerDocument } from './parse.js'
+export { applySourceOperation, applySourceOperationWithResult, instrumentDesignerNodes, parseDesignerDocument } from './parse.js'

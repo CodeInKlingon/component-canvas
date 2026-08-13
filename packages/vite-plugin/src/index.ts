@@ -336,6 +336,15 @@ document.addEventListener('click', (event) => {
   send({ type: 'select', nodeId })
   select(nodeId)
 }, true)
+document.addEventListener('contextmenu', (event) => {
+  const target = event.target instanceof Element ? event.target.closest('[data-vue-designer-id]') : null
+  const nodeId = target?.getAttribute('data-vue-designer-id')
+  if (!nodeId) return
+  event.preventDefault()
+  event.stopPropagation()
+  send({ type: 'context-menu', nodeId, clientX: event.clientX, clientY: event.clientY })
+  select(nodeId)
+}, true)
 addEventListener('message', (event) => {
   const message = event.data
   if (message?.channel !== 'vue-designer' || message.session !== session) return

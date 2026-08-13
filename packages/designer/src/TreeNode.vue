@@ -18,6 +18,7 @@ const emit = defineEmits<{
   dragNode: [node: DesignerNode]
   dragEnd: []
   dropNode: [target: DesignerNode, position: 'before' | 'inside' | 'after']
+  contextMenu: [event: MouseEvent, node: DesignerNode]
 }>()
 
 const collapsed = computed(() => props.collapsedIds.has(props.node.id))
@@ -105,6 +106,7 @@ function handleChildDrop(target: DesignerNode, position: 'before' | 'inside' | '
         :title="node.lockedReason"
         :draggable="node.editable"
         @click="emit('select', node)"
+        @contextmenu.prevent.stop="emit('contextMenu', $event, node)"
         @dragstart="handleDragStart"
         @dragend="emit('dragEnd')"
         @dragover="handleDragOver($event, 'inside')"
@@ -135,6 +137,7 @@ function handleChildDrop(target: DesignerNode, position: 'before' | 'inside' | '
         @drag-node="emit('dragNode', $event)"
         @drag-end="emit('dragEnd')"
         @drop-node="handleChildDrop"
+        @context-menu="emit('contextMenu', $event, child)"
       />
     </ul>
     <div

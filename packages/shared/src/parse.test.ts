@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applySourceOperation, instrumentDesignerNodes, parseDesignerDocument } from './parse'
+import { applySourceOperation, applySourceOperationWithResult, instrumentDesignerNodes, parseDesignerDocument } from './parse'
 import { applyStyleOperation, getDesignerStyleRules } from './style'
 
 describe('parseDesignerDocument', () => {
@@ -142,6 +142,35 @@ describe('parseDesignerDocument', () => {
     const removed = applySourceOperation(source, { type: 'remove-node', nodeId: sections[0]!.id })
     expect(removed).not.toContain('<section>A</section>')
     expect(removed).toContain('<section>B</section>')
+  })
+
+  it('returns inserted offsets while preserving copied node source', () => {
+    const source = `<template>\n  <main>\n    <Card :count="count"><strong>Title</strong></Card>\n  </main>\n</template>`
+    const main = parseDesignerDocument(source).tree[0]!
+    const card = main.children[0]!
+    const duplicated = applySourceOperationWithResult(source, { type: 'duplicate-node', nodeId: card.id })
+    expect(duplicated.source.slice(duplicated.selectionOffset)).toMatch(/^<Card :count="count"><strong>Title<\/strong><\/Card>/)
+    expect(parseDesignerDocument(duplicated.source).diagnostics).toEqual([])
+
+    const pasted = applySourceOperationWithResult(source, {
+      type: 'insert-node', targetId: main.id, position: 'inside', source: '<section data-kind="copy"><span>Nested</span></section>',
+    })
+    expect(pasted.source.slice(pasted.selectionOffset)).toMatch(/^<section data-kind="copy">/)
+    expect(parseDesignerDocument(pasted.source).diagnostics).toEqual([])
+  })
+
+  it('rejects paste into locked and void nodes', () => {
+    const source = '<template><main v-if="shown"><img></main></template>'
+    const main = parseDesignerDocument(source).tree[0]!
+    expect(() => applySourceOperation(source, {
+      type: 'insert-node', targetId: main.id, position: 'inside', source: '<p>Copy</p>',
+    })).toThrow('editable targets')
+
+    const editableSource = '<template><main><img></main></template>'
+    const image = parseDesignerDocument(editableSource).tree[0]!.children[0]!
+    expect(() => applySourceOperation(editableSource, {
+      type: 'insert-node', targetId: image.id, position: 'inside', source: '<p>Copy</p>',
+    })).toThrow('cannot contain children')
   })
 
   it('moves nodes inside containers and rejects descendant cycles', () => {

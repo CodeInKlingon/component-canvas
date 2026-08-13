@@ -23,4 +23,9 @@ describe('preview protocol validation', () => {
     expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'ai-prompt', nodeId: 'node-1' })).toBe(true)
     expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'ai-prompt', nodeId: null })).toBe(false)
   })
+
+  it('validates canvas context menu coordinates', () => {
+    expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'context-menu', nodeId: 'node-1', clientX: 12, clientY: 30 })).toBe(true)
+    expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'context-menu', nodeId: 'node-1', clientX: Infinity, clientY: 30 })).toBe(false)
+  })
 })

@@ -203,11 +203,21 @@ function escapeAttribute(value: string): string {
   return escapeText(value).replaceAll('"', '&quot;')
 }
 
+export interface DesignerSourceOperationResult {
+  source: string
+  selectionOffset?: number
+}
+
 export function applySourceOperation(source: string, operation: DesignerSourceOperation): string {
+  return applySourceOperationWithResult(source, operation).source
+}
+
+export function applySourceOperationWithResult(source: string, operation: DesignerSourceOperation): DesignerSourceOperationResult {
   const parsed = parseDesignerDocument(source)
   if (parsed.diagnostics.some((item) => item.severity === 'error')) throw new Error('Cannot edit an invalid document')
   const targetId = operation.type === 'insert-component' || operation.type === 'insert-native'
     ? operation.parentId
+    : operation.type === 'insert-node' ? operation.targetId
     : operation.nodeId
   const node = findNode(parsed.tree, targetId)
   if (!node) throw new Error('Selected node no longer exists')
@@ -215,7 +225,7 @@ export function applySourceOperation(source: string, operation: DesignerSourceOp
   if (operation.type === 'remove-node') {
     if (!node.editable) throw new Error('Locked nodes cannot be removed')
     const range = removalRange(source, node)
-    return `${source.slice(0, range.start)}${source.slice(range.end)}`
+    return { source: `${source.slice(0, range.start)}${source.slice(range.end)}` }
   }
 
   if (operation.type === 'duplicate-node') {
@@ -223,7 +233,23 @@ export function applySourceOperation(source: string, operation: DesignerSourceOp
     const range = removalRange(source, node)
     const snippet = source.slice(node.range.start, node.range.end)
     const indent = lineIndent(source, node.range.start)
-    return `${source.slice(0, range.end)}${indent}${snippet}\n${source.slice(range.end)}`
+    return {
+      source: `${source.slice(0, range.end)}${indent}${snippet}\n${source.slice(range.end)}`,
+      selectionOffset: range.end + indent.length,
+    }
+  }
+
+  if (operation.type === 'insert-node') {
+    if (!node.editable) throw new Error('Nodes can only be pasted at editable targets')
+    if (!operation.source.trim()) throw new Error('The clipboard node is empty')
+    const insertion = insertionPoint(source, node, operation.position)
+    const prefix = operation.position === 'inside' ? `\n${insertion.indent}` : insertion.indent
+    const suffix = operation.position === 'inside' ? `\n${insertion.closingIndent ?? ''}` : '\n'
+    const result = `${source.slice(0, insertion.offset)}${prefix}${operation.source}${suffix}${source.slice(insertion.replaceEnd)}`
+    const reparsed = parseDesignerDocument(result)
+    const parseError = reparsed.diagnostics.find((item) => item.severity === 'error')
+    if (parseError) throw new Error(parseError.message)
+    return { source: result, selectionOffset: insertion.offset + prefix.length }
   }
 
   if (operation.type === 'move-node') {
@@ -235,7 +261,7 @@ export function applySourceOperation(source: string, operation: DesignerSourceOp
       throw new Error('A node cannot be moved into its own descendants')
     }
     if (operation.position === 'inside' && target.children.at(-1)?.id === node.id) {
-      return source
+      return { source }
     }
 
     const remove = removalRange(source, node)
@@ -251,7 +277,7 @@ export function applySourceOperation(source: string, operation: DesignerSourceOp
     const separator = operation.position === 'inside'
       ? `\n${insertion.indent}${snippet}\n${insertion.closingIndent ?? ''}`
       : `${insertion.indent}${snippet}\n`
-    return `${before}${separator}${after}`
+    return { source: `${before}${separator}${after}` }
   }
 
   if (operation.type === 'insert-component') {
@@ -281,7 +307,7 @@ export function applySourceOperation(source: string, operation: DesignerSourceOp
         result = `${result.slice(0, templateStart)}<script setup>\n${importStatement}</script>\n\n${result.slice(templateStart)}`
       }
     }
-    return result
+    return { source: result }
   }
 
   if (operation.type === 'insert-native') {
@@ -315,21 +341,21 @@ export function applySourceOperation(source: string, operation: DesignerSourceOp
     const reparsed = parseDesignerDocument(result)
     const parseError = reparsed.diagnostics.find((item) => item.severity === 'error')
     if (parseError) throw new Error(parseError.message)
-    return result
+    return { source: result }
   }
 
   if (operation.type === 'set-text') {
     if (node.kind !== 'text') throw new Error('The selected node is not text')
-    return `${source.slice(0, node.range.start)}${escapeText(operation.value)}${source.slice(node.range.end)}`
+    return { source: `${source.slice(0, node.range.start)}${escapeText(operation.value)}${source.slice(node.range.end)}` }
   }
 
   const attribute = node.attributes.find((item) => item.name === operation.name)
   if (attribute && !attribute.editable) throw new Error('The selected attribute is not editable')
   if (operation.value === null) {
-    if (!attribute) return source
+    if (!attribute) return { source }
     let start = attribute.range.start
     if (/\s/.test(source[start - 1] ?? '')) start--
-    return `${source.slice(0, start)}${source.slice(attribute.range.end)}`
+    return { source: `${source.slice(0, start)}${source.slice(attribute.range.end)}` }
   }
 
   const binding = operation.binding || attribute?.kind === 'literal-binding'
@@ -341,7 +367,7 @@ export function applySourceOperation(source: string, operation: DesignerSourceOp
     : `${operation.name}="${escapeAttribute(serialized)}"`
   if (!attribute) {
     const insertAt = node.range.start + 1 + node.label.length
-    return `${source.slice(0, insertAt)} ${replacement}${source.slice(insertAt)}`
+    return { source: `${source.slice(0, insertAt)} ${replacement}${source.slice(insertAt)}` }
   }
-  return `${source.slice(0, attribute.range.start)}${replacement}${source.slice(attribute.range.end)}`
+  return { source: `${source.slice(0, attribute.range.start)}${replacement}${source.slice(attribute.range.end)}` }
 }

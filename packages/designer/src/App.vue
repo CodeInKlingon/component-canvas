@@ -35,13 +35,14 @@ import type {
   DesignerDocumentChangedEvent,
   PreviewCandidateResponse,
 } from '@vue-designer/shared'
-import { applySourceOperation, isPreviewToEditorMessage, isVoidElement, parseDesignerDocument } from '@vue-designer/shared'
+import { applySourceOperationWithResult, isPreviewToEditorMessage, isVoidElement, parseDesignerDocument } from '@vue-designer/shared'
 import TreeNode from './TreeNode.vue'
 import SourceEditor from './SourceEditor.vue'
 import { SourceHistory } from './history'
 import { findNode, findNodeAtOffset, findNodeAtPath, findNodePath, findRenderedSelection, reconcileCollapsedTree } from './selection'
 import { nativeElements, type NativeElementMetadata } from './native-elements'
 import { captureDragSelection, findDragSelectionOffset, type DragSelection } from './drag-selection'
+import { nodeClipboardMime, parseNodeClipboard, serializeNodeClipboard, type NodeClipboardPayload } from './node-clipboard'
 
 type SaveState = 'clean' | 'dirty' | 'saving' | 'conflict'
 
@@ -75,6 +76,9 @@ const draggedNative = ref<NativeElementMetadata | null>(null)
 const draggedNode = ref<DesignerNode | null>(null)
 const dragSelection = ref<DragSelection | null>(null)
 const droppedSelection = ref<DragSelection | null>(null)
+const insertedSelectionOffset = ref<number | null>(null)
+const contextMenu = ref<{ nodeId: string; x: number; y: number } | null>(null)
+const clipboardPayload = ref<NodeClipboardPayload | null>(null)
 const externalRevision = ref<string | null>(null)
 const aiEnabled = ref(false)
 const aiPromptOpen = ref(false)
@@ -200,6 +204,60 @@ function canContainChildren(node: DesignerNode | null): boolean {
   return !!node && node.kind !== 'text' && !(node.kind === 'element' && isVoidElement(node.label)) && node.editable
 }
 
+function openContextMenu(event: MouseEvent, node: DesignerNode): void {
+  if (!node.editable) return
+  selectNode(node, false)
+  contextMenu.value = {
+    nodeId: node.id,
+    x: Math.min(event.clientX, window.innerWidth - 190),
+    y: Math.min(event.clientY, window.innerHeight - 180),
+  }
+}
+
+function closeContextMenu(): void {
+  contextMenu.value = null
+}
+
+async function copyContextNode(): Promise<void> {
+  const node = findNode(activeDocument.value?.tree ?? [], contextMenu.value?.nodeId ?? null)
+  if (!node?.editable) return
+  const serialized = serializeNodeClipboard(node, source.value)
+  clipboardPayload.value = parseNodeClipboard(serialized)
+  try {
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        [nodeClipboardMime]: new Blob([serialized], { type: nodeClipboardMime }),
+        'text/plain': new Blob([source.value.slice(node.range.start, node.range.end)], { type: 'text/plain' }),
+      }),
+    ])
+  } catch {
+    // The in-memory payload keeps same-session paste available when clipboard permissions are denied.
+  }
+  closeContextMenu()
+}
+
+async function readClipboardPayload(): Promise<NodeClipboardPayload | null> {
+  try {
+    for (const item of await navigator.clipboard.read()) {
+      if (!item.types.includes(nodeClipboardMime)) continue
+      const payload = parseNodeClipboard(await (await item.getType(nodeClipboardMime)).text())
+      if (payload) return payload
+    }
+  } catch {
+    // Fall back to the last validated same-session payload.
+  }
+  return clipboardPayload.value
+}
+
+async function pasteContextNode(position: 'inside' | 'after'): Promise<void> {
+  const target = findNode(activeDocument.value?.tree ?? [], contextMenu.value?.nodeId ?? null)
+  if (!target?.editable || (position === 'inside' && !canContainChildren(target))) return
+  const payload = await readClipboardPayload()
+  if (!payload) return
+  closeContextMenu()
+  await applyOperation({ type: 'insert-node', targetId: target.id, position, source: payload.source })
+}
+
 function insertNative(element: NativeElementMetadata, target = selectedNode.value): void {
   if (!canContainChildren(target)) return
   void applyOperation({
@@ -262,6 +320,12 @@ function duplicateSelectedNode(): void {
   if (node?.editable) void applyOperation({ type: 'duplicate-node', nodeId: node.id })
 }
 
+function duplicateContextNode(): void {
+  const node = findNode(activeDocument.value?.tree ?? [], contextMenu.value?.nodeId ?? null)
+  closeContextMenu()
+  if (node?.editable) void applyOperation({ type: 'duplicate-node', nodeId: node.id })
+}
+
 function removeSelectedNode(): void {
   const node = selectedNode.value
   if (!node?.editable || !window.confirm(`Delete ${node.label}?`)) return
@@ -311,16 +375,18 @@ async function createCandidate(candidateSource: string): Promise<void> {
   const movedSelectionOffset = droppedSelection.value
     ? findDragSelectionOffset(candidateSource, droppedSelection.value)
     : null
+  const nextSelectionOffset = insertedSelectionOffset.value ?? movedSelectionOffset
   if (candidateSource === document.source) {
     const parsed = parseDesignerDocument(candidateSource)
     candidateId.value = null
     activeDocument.value = { ...document, tree: parsed.tree, diagnostics: parsed.diagnostics }
     replaceTree(parsed.tree)
-    selectedNodeId.value = (movedSelectionOffset === null ? null : findNodeAtOffset(parsed.tree, movedSelectionOffset)?.id)
+    selectedNodeId.value = (nextSelectionOffset === null ? null : findNodeAtOffset(parsed.tree, nextSelectionOffset)?.id)
       ?? findNode(parsed.tree, selectedNodeId.value)?.id
       ?? findNodeAtPath(parsed.tree, selectedPath)?.id
       ?? null
     droppedSelection.value = null
+    insertedSelectionOffset.value = null
     saveState.value = 'clean'
     error.value = ''
     return
@@ -337,22 +403,26 @@ async function createCandidate(candidateSource: string): Promise<void> {
     candidateId.value = result.candidateId
     activeDocument.value = { ...document, tree: result.tree, diagnostics: result.diagnostics }
     replaceTree(result.tree)
-    selectedNodeId.value = (movedSelectionOffset === null ? null : findNodeAtOffset(result.tree, movedSelectionOffset)?.id)
+    selectedNodeId.value = (nextSelectionOffset === null ? null : findNodeAtOffset(result.tree, nextSelectionOffset)?.id)
       ?? findNode(result.tree, selectedNodeId.value)?.id
       ?? findNodeAtPath(result.tree, selectedPath)?.id
       ?? null
     droppedSelection.value = null
+    insertedSelectionOffset.value = null
     error.value = ''
   } catch (cause) {
     if (request !== candidateRequest) return
     droppedSelection.value = null
+    insertedSelectionOffset.value = null
     error.value = cause instanceof Error ? cause.message : 'Unable to preview source'
   }
 }
 
 async function applyOperation(operation: DesignerSourceOperation): Promise<void> {
   try {
-    const candidateSource = applySourceOperation(source.value, operation)
+    const result = applySourceOperationWithResult(source.value, operation)
+    const candidateSource = result.source
+    insertedSelectionOffset.value = result.selectionOffset ?? null
     recordSource(candidateSource)
     source.value = candidateSource
     saveState.value = candidateSource === activeDocument.value?.source ? 'clean' : 'dirty'
@@ -702,6 +772,14 @@ function handlePreviewMessage(event: MessageEvent): void {
   }
   const node = findNode(activeDocument.value?.tree ?? [], event.data.nodeId)
   if (node) {
+    if (event.data.type === 'context-menu') {
+      const frame = previewFrame.value?.getBoundingClientRect()
+      if (frame) openContextMenu(new MouseEvent('contextmenu', {
+        clientX: frame.left + event.data.clientX,
+        clientY: frame.top + event.data.clientY,
+      }), node)
+      return
+    }
     selectNode(node, event.data.type !== 'ai-prompt')
     if (event.data.type === 'ai-prompt' && aiEnabled.value) aiPromptOpen.value = true
   }
@@ -718,6 +796,7 @@ function handlePreviewLoad(): void {
 }
 
 function handleShortcut(event: KeyboardEvent): void {
+  if (event.key === 'Escape') closeContextMenu()
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
     event.preventDefault()
     void save()
@@ -736,12 +815,14 @@ import.meta.hot?.on('vue-designer:document-changed', handleExternalChange)
 onMounted(() => {
   window.addEventListener('keydown', handleShortcut)
   window.addEventListener('message', handlePreviewMessage)
+  window.addEventListener('pointerdown', closeContextMenu)
   void loadDocuments()
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleShortcut)
   window.removeEventListener('message', handlePreviewMessage)
+  window.removeEventListener('pointerdown', closeContextMenu)
   window.clearTimeout(sourcePreviewTimer)
   import.meta.hot?.off('vue-designer:document-changed', handleExternalChange)
 })
@@ -810,6 +891,7 @@ onUnmounted(() => {
                 @drag-node="startNodeDrag"
                 @drag-end="endTreeDrag"
                 @drop-node="handleTreeDrop"
+                @context-menu="openContextMenu"
               />
             </ul>
             <div v-else class="empty-state">No Vue documents match the configured pattern.</div>
@@ -1009,6 +1091,19 @@ onUnmounted(() => {
       <button v-if="saveState === 'conflict' && externalRevision" @click="keepLocalChanges">Overwrite disk</button>
       <button v-if="previewDiagnostic" @click="reloadPreview">Reload preview</button>
       <button @click="error = ''; previewDiagnostic = null">Dismiss</button>
+    </div>
+    <div
+      v-if="contextMenu"
+      class="node-context-menu"
+      role="menu"
+      :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
+      @pointerdown.stop
+    >
+      <button role="menuitem" @click="copyContextNode">Copy</button>
+      <button role="menuitem" @click="duplicateContextNode">Duplicate</button>
+      <hr />
+      <button role="menuitem" :disabled="!canContainChildren(selectedNode)" @click="pasteContextNode('inside')">Paste inside</button>
+      <button role="menuitem" @click="pasteContextNode('after')">Paste after</button>
     </div>
   </div>
 </template>
