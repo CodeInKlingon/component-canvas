@@ -76,6 +76,10 @@ function handleDragStart(event: DragEvent): void {
 function handleChildDrop(target: DesignerNode, position: 'before' | 'inside' | 'after'): void {
   emit('dropNode', target, position)
 }
+
+function handleChildContextMenu(event: MouseEvent, node: DesignerNode): void {
+  emit('contextMenu', event, node)
+}
 </script>
 
 <template>
@@ -137,7 +141,7 @@ function handleChildDrop(target: DesignerNode, position: 'before' | 'inside' | '
         @drag-node="emit('dragNode', $event)"
         @drag-end="emit('dragEnd')"
         @drop-node="handleChildDrop"
-        @context-menu="emit('contextMenu', $event, child)"
+        @context-menu="handleChildContextMenu"
       />
     </ul>
     <div
