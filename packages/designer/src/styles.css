@@ -53,11 +53,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .save-button:disabled { border-color: var(--border); background: var(--surface-subtle); color: var(--faint); box-shadow: none; cursor: default; }
 
 .workspace { min-height: 0; display: grid; grid-template-columns: 270px minmax(420px, 1fr) minmax(300px, 320px); }
+.workspace.sidebar-collapsed { grid-template-columns: 38px minmax(420px, 1fr) minmax(300px, 320px); }
+.workspace.inspector-collapsed { grid-template-columns: 270px minmax(420px, 1fr) 38px; }
+.workspace.sidebar-collapsed.inspector-collapsed { grid-template-columns: 38px minmax(420px, 1fr) 38px; }
 .sidebar, .inspector-panel { min-height: 0; background: var(--background); }
 .sidebar { display: grid; grid-template-rows: 48px 1fr 52px; border-right: 1px solid var(--border); }
+.sidebar.collapsed { grid-template-rows: 48px 1fr; }
 .sidebar-content { min-height: 0; overflow: auto; }
 .inspector-panel { display: grid; grid-template-rows: 48px 1fr; border-left: 1px solid var(--border); }
 .panel-heading { height: 48px; padding: 0 12px 0 14px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); color: var(--text); font-size: 14px; font-weight: 650; }
+.panel-heading-actions { display: flex; align-items: center; }
+.sidebar.collapsed .panel-heading { justify-content: center; padding: 0; }
 .panel-heading button, .source-panel-header button { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); }
 .panel-heading button:hover, .source-panel-header button:hover { background: var(--surface-subtle); color: var(--text); }
 .document-picker { display: grid; grid-template-columns: 18px 1fr 14px; align-items: center; gap: 7px; margin: 10px; border: 1px solid var(--border); border-radius: var(--radius); padding: 0 9px; color: var(--selection); }
@@ -164,8 +170,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .source-panel-header > span { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 650; }
 .source-panel-header code { color: var(--muted); font: 14px var(--mono); }
 
-.inspector-tabs { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border); padding: 0 10px; }
+.inspector-tabs { display: grid; grid-template-columns: 1fr 1fr 30px; border-bottom: 1px solid var(--border); padding: 0 8px 0 10px; }
+.inspector-panel.collapsed .inspector-tabs { grid-template-columns: 1fr; padding: 0 4px; }
 .inspector-tabs button { position: relative; border: 0; background: none; color: var(--muted); font-size: 14px; font-weight: 550; }
+.inspector-tabs .panel-collapse-button { display: grid; place-items: center; align-self: center; width: 30px; height: 30px; border-radius: 6px; }
+.inspector-tabs .panel-collapse-button:hover { background: var(--surface); color: var(--text); }
 .inspector-tabs button.active { color: var(--selection); }
 .inspector-tabs button.active::after { content: ''; position: absolute; height: 2px; left: 8px; right: 8px; bottom: -1px; background: var(--selection); }
 .inspector-content { min-height: 0; overflow: auto; }
@@ -224,6 +233,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 @media (max-width: 1120px) {
   .workspace { grid-template-columns: 230px minmax(400px, 1fr) 290px; }
+  .workspace.sidebar-collapsed { grid-template-columns: 38px minmax(400px, 1fr) 290px; }
+  .workspace.inspector-collapsed { grid-template-columns: 230px minmax(400px, 1fr) 38px; }
+  .workspace.sidebar-collapsed.inspector-collapsed { grid-template-columns: 38px minmax(400px, 1fr) 38px; }
   .topbar { grid-template-columns: 190px minmax(160px, 1fr) auto; }
   .brand small, .save-state, .viewport-switcher button span { display: none; }
   .viewport-switcher button { padding: 0 8px; }
@@ -235,6 +247,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .document-title { justify-self: start; }
   .actions { display: none; }
   .workspace { grid-template-columns: 220px minmax(460px, 1fr); }
+  .workspace.sidebar-collapsed { grid-template-columns: 38px minmax(460px, 1fr); }
   .inspector-panel { display: none; }
   .diagnostic { left: 236px; }
 }

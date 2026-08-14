@@ -13,6 +13,10 @@ import {
   Monitor,
   PanelBottomClose,
   PanelBottomOpen,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Plus,
   Redo2,
   RefreshCw,
@@ -79,6 +83,8 @@ const treeCollapseState = new Map<string, Set<string>>()
 const candidateId = ref<string | null>(null)
 const inspectorView = ref<'content' | 'style'>('content')
 const sidebarView = ref<'layers' | 'components'>('layers')
+const sidebarOpen = ref(true)
+const inspectorOpen = ref(true)
 const sourceOpen = ref(true)
 const activeStyleSelector = ref('')
 const styleRules = ref<DesignerStyleRule[]>([])
@@ -1161,13 +1167,17 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <main class="workspace">
-      <aside class="sidebar">
+    <main class="workspace" :class="{ 'sidebar-collapsed': !sidebarOpen, 'inspector-collapsed': !inspectorOpen }">
+      <aside class="sidebar" :class="{ collapsed: !sidebarOpen }">
         <div class="panel-heading">
-          <span>{{ sidebarView === 'layers' ? 'Layers' : 'Components' }}</span>
-          <button title="Refresh project" aria-label="Refresh project" @click="loadDocuments"><RefreshCw :size="14" /></button>
+          <span v-if="sidebarOpen">{{ sidebarView === 'layers' ? 'Layers' : 'Components' }}</span>
+          <div v-if="sidebarOpen" class="panel-heading-actions">
+            <button title="Refresh project" aria-label="Refresh project" @click="loadDocuments"><RefreshCw :size="14" /></button>
+            <button title="Collapse left panel" aria-label="Collapse left panel" @click="sidebarOpen = false"><PanelLeftClose :size="15" /></button>
+          </div>
+          <button v-else title="Expand left panel" aria-label="Expand left panel" @click="sidebarOpen = true"><PanelLeftOpen :size="15" /></button>
         </div>
-        <div class="sidebar-content">
+        <div v-if="sidebarOpen" class="sidebar-content">
           <template v-if="sidebarView === 'layers'">
             <div class="document-picker">
               <FileCode2 :size="15" />
@@ -1217,7 +1227,7 @@ onUnmounted(() => {
             </div>
           </template>
         </div>
-        <div class="sidebar-switcher" aria-label="Sidebar view">
+        <div v-if="sidebarOpen" class="sidebar-switcher" aria-label="Sidebar view">
           <button :class="{ active: sidebarView === 'layers' }" @click="sidebarView = 'layers'"><Layers3 :size="15" />Layers</button>
           <button :class="{ active: sidebarView === 'components' }" @click="sidebarView = 'components'"><Component :size="15" />Components</button>
         </div>
@@ -1287,13 +1297,16 @@ onUnmounted(() => {
         </section>
       </div>
 
-      <aside class="inspector-panel">
+      <aside class="inspector-panel" :class="{ collapsed: !inspectorOpen }">
         <div class="inspector-tabs">
-          <button :class="{ active: inspectorView === 'content' }" @click="inspectorView = 'content'">Props</button>
-          <button :class="{ active: inspectorView === 'style' }" @click="inspectorView = 'style'">Style</button>
+          <button v-if="inspectorOpen" :class="{ active: inspectorView === 'content' }" @click="inspectorView = 'content'">Props</button>
+          <button v-if="inspectorOpen" :class="{ active: inspectorView === 'style' }" @click="inspectorView = 'style'">Style</button>
+          <button class="panel-collapse-button" :title="inspectorOpen ? 'Collapse right panel' : 'Expand right panel'" :aria-label="inspectorOpen ? 'Collapse right panel' : 'Expand right panel'" @click="inspectorOpen = !inspectorOpen">
+            <PanelRightClose v-if="inspectorOpen" :size="15" /><PanelRightOpen v-else :size="15" />
+          </button>
         </div>
 
-        <div v-if="inspectorView === 'content'" class="inspector-content">
+        <div v-if="inspectorOpen && inspectorView === 'content'" class="inspector-content">
           <div v-if="!selectedNode" class="inspector-empty">
             <strong>Select a layer</strong>
             <span>Text and attributes for the selected element will appear here.</span>
@@ -1363,7 +1376,7 @@ onUnmounted(() => {
           </template>
         </div>
 
-        <div v-else-if="inspectorView === 'style'" class="inspector-content style-inspector">
+        <div v-else-if="inspectorOpen && inspectorView === 'style'" class="inspector-content style-inspector">
           <div v-if="!selectedNode || selectedNode.kind === 'text'" class="inspector-empty">
             <strong>Select an element</strong>
             <span>Editable local CSS rules will appear here.</span>
