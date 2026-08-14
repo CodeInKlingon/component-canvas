@@ -135,6 +135,7 @@ export type DesignerSourceOperation =
       name: string
       importSource: string
       defaultContent?: string
+      position?: 'inside' | 'after'
     }
   | {
       type: 'insert-native'
@@ -144,6 +145,7 @@ export type DesignerSourceOperation =
       defaultContent?: string
       defaultChildren?: string
       attributes?: Record<string, string | number | boolean>
+      position?: 'inside' | 'after'
     }
   | { type: 'remove-node'; nodeId: string }
   | { type: 'duplicate-node'; nodeId: string }

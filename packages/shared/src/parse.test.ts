@@ -74,6 +74,21 @@ describe('parseDesignerDocument', () => {
     expect(insertedAgain.match(/import NoticeBadge/g)).toHaveLength(1)
   })
 
+  it('inserts components and native elements after the target', () => {
+    const source = `<template>\n  <main>\n    <p>First</p>\n  </main>\n</template>\n`
+    const paragraph = parseDesignerDocument(source).tree[0]!.children[0]!
+    const withComponent = applySourceOperation(source, {
+      type: 'insert-component', parentId: paragraph.id, position: 'after', name: 'Card', importSource: './Card.vue',
+    })
+    expect(withComponent).toContain('    <p>First</p>\n    <Card>Card</Card>')
+
+    const reparsedParagraph = parseDesignerDocument(withComponent).tree[0]!.children[0]!
+    const withNative = applySourceOperation(withComponent, {
+      type: 'insert-native', parentId: reparsedParagraph.id, position: 'after', tag: 'hr', contentModel: 'void',
+    })
+    expect(withNative).toContain('    <p>First</p>\n    <hr>\n    <Card>Card</Card>')
+  })
+
   it('rejects insertion into locked structural nodes', () => {
     const source = `<template><section v-for="item in items"><span>Item</span></section></template>`
     const section = parseDesignerDocument(source).tree[0]!

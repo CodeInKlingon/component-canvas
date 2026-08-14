@@ -90,6 +90,7 @@ const dragSelection = ref<DragSelection | null>(null)
 const droppedSelection = ref<DragSelection | null>(null)
 const insertedSelectionOffset = ref<number | null>(null)
 const contextMenu = ref<{ nodeId: string; x: number; y: number } | null>(null)
+const insertPicker = ref<{ nodeId: string; position: 'inside' | 'after' } | null>(null)
 const clipboardPayload = ref<NodeClipboardPayload | null>(null)
 const externalRevision = ref<string | null>(null)
 const aiEnabled = ref(false)
@@ -217,17 +218,37 @@ function relativeImport(documentPath: string, componentPath: string): string {
   return relative.startsWith('.') ? relative : `./${relative}`
 }
 
-function insertComponent(component: DesignerComponentMetadata, target = selectedNode.value): void {
+function insertComponent(component: DesignerComponentMetadata, target = selectedNode.value, position: 'inside' | 'after' = 'inside'): void {
   const document = activeDocument.value
   const parent = target
-  if (!document || !parent || parent.kind === 'text' || !parent.editable) return
+  if (!document || !parent || !parent.editable || (position === 'inside' && parent.kind === 'text')) return
   void applyOperation({
     type: 'insert-component',
     parentId: parent.id,
     name: component.name,
     importSource: relativeImport(document.path, component.source),
     defaultContent: component.defaultContent,
+    position,
   })
+}
+
+function openInsertPicker(position: 'inside' | 'after'): void {
+  const nodeId = contextMenu.value?.nodeId
+  if (!nodeId) return
+  insertPicker.value = { nodeId, position }
+  closeContextMenu()
+}
+
+function closeInsertPicker(): void {
+  insertPicker.value = null
+}
+
+function pickComponent(component: DesignerComponentMetadata): void {
+  const picker = insertPicker.value
+  const target = findNode(activeDocument.value?.tree ?? [], picker?.nodeId ?? null)
+  if (!picker || !target) return
+  insertComponent(component, target, picker.position)
+  closeInsertPicker()
 }
 
 function canContainChildren(node: DesignerNode | null): boolean {
@@ -288,8 +309,8 @@ async function pasteContextNode(position: 'inside' | 'after'): Promise<void> {
   await applyOperation({ type: 'insert-node', targetId: target.id, position, source: payload.source })
 }
 
-function insertNative(element: NativeElementMetadata, target = selectedNode.value): void {
-  if (!canContainChildren(target)) return
+function insertNative(element: NativeElementMetadata, target = selectedNode.value, position: 'inside' | 'after' = 'inside'): void {
+  if (!target?.editable || (position === 'inside' && !canContainChildren(target))) return
   void applyOperation({
     type: 'insert-native',
     parentId: target!.id,
@@ -298,7 +319,16 @@ function insertNative(element: NativeElementMetadata, target = selectedNode.valu
     defaultContent: element.defaultContent,
     defaultChildren: element.defaultChildren,
     attributes: element.attributes,
+    position,
   })
+}
+
+function pickNative(element: NativeElementMetadata): void {
+  const picker = insertPicker.value
+  const target = findNode(activeDocument.value?.tree ?? [], picker?.nodeId ?? null)
+  if (!picker || !target) return
+  insertNative(element, target, picker.position)
+  closeInsertPicker()
 }
 
 function startNodeDrag(node: DesignerNode): void {
@@ -1030,6 +1060,7 @@ function handleShortcut(event: KeyboardEvent): void {
   if (event.key === 'Escape') {
     escapeDeselecting = true
     closeContextMenu()
+    closeInsertPicker()
     deselectNode()
   }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
@@ -1402,6 +1433,9 @@ onUnmounted(() => {
       :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
       @pointerdown.stop
     >
+            <button role="menuitem" :disabled="!canContainChildren(selectedNode)" @click="openInsertPicker('inside')">Insert inside...</button>
+            <button role="menuitem" @click="openInsertPicker('after')">Insert after...</button>
+            <hr />
             <button role="menuitem" @click="copyContextNode">Copy</button>
             <button role="menuitem" @click="duplicateContextNode">Duplicate</button>
             <hr />
@@ -1410,5 +1444,31 @@ onUnmounted(() => {
             <hr />
             <button class="danger" role="menuitem" @click="removeContextNode">Delete</button>
           </div>
+    <div v-if="insertPicker" class="insert-picker-backdrop" @pointerdown.self="closeInsertPicker">
+      <section class="insert-picker" role="dialog" aria-modal="true" aria-labelledby="insert-picker-title">
+        <header>
+          <div><strong id="insert-picker-title">Insert {{ insertPicker.position }}</strong><small>Choose a project component or native element</small></div>
+          <button aria-label="Close insert picker" @click="closeInsertPicker">×</button>
+        </header>
+        <div class="insert-picker-content">
+          <section>
+            <h3>Project components</h3>
+            <div class="component-palette">
+              <button v-for="component in components" :key="component.name" @click="pickComponent(component)">
+                <span class="component-glyph"><Component :size="14" /></span><span><strong>{{ component.label }}</strong><small>{{ component.category }}</small></span><Plus :size="13" />
+              </button>
+            </div>
+          </section>
+          <section>
+            <h3>Native elements</h3>
+            <div class="component-palette native-palette">
+              <button v-for="element in nativeElements" :key="element.tag" @click="pickNative(element)">
+                <span class="component-glyph"><Braces :size="14" /></span><span><strong>{{ element.label }}</strong><small>{{ element.category }}</small></span><Plus :size="13" />
+              </button>
+            </div>
+          </section>
+        </div>
+      </section>
+    </div>
   </div>
 </template>

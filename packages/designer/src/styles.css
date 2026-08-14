@@ -114,6 +114,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .node-context-menu button.danger:hover { background: #fef2f2; color: var(--danger); }
 .node-context-menu button:disabled { color: var(--faint); cursor: default; }
 .node-context-menu hr { width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--border); }
+.insert-picker-backdrop { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 24px; background: #0f172a66; backdrop-filter: blur(2px); }
+.insert-picker { width: min(720px, 100%); max-height: min(680px, calc(100vh - 48px)); overflow: hidden; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--background); box-shadow: 0 24px 64px #0f172a45; }
+.insert-picker > header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding: 14px 16px; }
+.insert-picker > header div { display: grid; gap: 3px; }
+.insert-picker > header small { color: var(--muted); }
+.insert-picker > header button { width: 30px; height: 30px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 22px; }
+.insert-picker > header button:hover { background: var(--surface); color: var(--text); }
+.insert-picker-content { display: grid; grid-template-columns: 1fr 1fr; max-height: calc(min(680px, 100vh - 48px) - 64px); overflow: auto; }
+.insert-picker-content > section { min-width: 0; padding: 8px 6px 14px; }
+.insert-picker-content > section + section { border-left: 1px solid var(--border); }
+.insert-picker-content h3 { margin: 8px 12px 10px; color: var(--muted); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
 
 .center-workspace { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(260px, 1fr) minmax(180px, 30vh); }
 .center-workspace.source-collapsed { grid-template-rows: minmax(260px, 1fr) 39px; }

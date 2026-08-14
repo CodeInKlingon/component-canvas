@@ -281,19 +281,15 @@ export function applySourceOperationWithResult(source: string, operation: Design
   }
 
   if (operation.type === 'insert-component') {
-    if (node.kind === 'text' || !node.editable) throw new Error('Components can only be inserted into editable elements')
-    if (node.kind === 'element' && voidTags.has(node.label)) throw new Error('The selected element cannot contain children')
-    const closingTagStart = closingTagOffset(source, node)
-    if (closingTagStart < node.range.start) throw new Error('The selected element cannot contain children')
-
-    let insertionStart = closingTagStart
-    while (insertionStart > node.range.start && /\s/.test(source[insertionStart - 1] ?? '')) insertionStart--
-
-    const lineStart = source.lastIndexOf('\n', node.range.start) + 1
-    const parentIndent = source.slice(lineStart, node.range.start).match(/^\s*/)?.[0] ?? ''
-    const childIndent = `${parentIndent}  `
+    const position = operation.position ?? 'inside'
+    if (!node.editable || (position === 'inside' && node.kind === 'text')) throw new Error('Components can only be inserted at editable elements')
+    if (position === 'inside' && node.kind === 'element' && voidTags.has(node.label)) throw new Error('The selected element cannot contain children')
+    const insertion = insertionPoint(source, node, position)
     const content = operation.defaultContent ?? operation.name
-    let result = `${source.slice(0, insertionStart)}\n${childIndent}<${operation.name}>${escapeText(content)}</${operation.name}>\n${parentIndent}${source.slice(closingTagStart)}`
+    const markup = `<${operation.name}>${escapeText(content)}</${operation.name}>`
+    const prefix = position === 'inside' ? `\n${insertion.indent}` : insertion.indent
+    const suffix = position === 'inside' ? `\n${insertion.closingIndent ?? ''}` : '\n'
+    let result = `${source.slice(0, insertion.offset)}${prefix}${markup}${suffix}${source.slice(insertion.replaceEnd)}`
 
     const sfc = parseSfc(result, { sourceMap: false }).descriptor
     const importPattern = new RegExp(`\\bimport\\s+${operation.name}\\b`)
@@ -311,12 +307,10 @@ export function applySourceOperationWithResult(source: string, operation: Design
   }
 
   if (operation.type === 'insert-native') {
-    if (node.kind === 'text' || !node.editable) throw new Error('Native elements can only be inserted into editable elements')
-    if (node.kind === 'element' && voidTags.has(node.label)) throw new Error('The selected element cannot contain children')
+    const position = operation.position ?? 'inside'
+    if (!node.editable || (position === 'inside' && node.kind === 'text')) throw new Error('Native elements can only be inserted at editable elements')
+    if (position === 'inside' && node.kind === 'element' && voidTags.has(node.label)) throw new Error('The selected element cannot contain children')
     if (!/^[a-z][a-z0-9-]*$/.test(operation.tag)) throw new Error('Invalid native element tag')
-    const closingTagStart = closingTagOffset(source, node)
-    if (closingTagStart < node.range.start) throw new Error('The selected element cannot contain children')
-
     if ((operation.contentModel === 'void') !== voidTags.has(operation.tag)) {
       throw new Error('Native element content model does not match its tag')
     }
@@ -333,11 +327,10 @@ export function applySourceOperationWithResult(source: string, operation: Design
       ? `<${operation.tag}${attributes}>`
       : `<${operation.tag}${attributes}>${children}</${operation.tag}>`
 
-    let insertionStart = closingTagStart
-    while (insertionStart > node.range.start && /\s/.test(source[insertionStart - 1] ?? '')) insertionStart--
-    const parentIndent = lineIndent(source, node.range.start)
-    const childIndent = `${parentIndent}  `
-    const result = `${source.slice(0, insertionStart)}\n${childIndent}${markup}\n${parentIndent}${source.slice(closingTagStart)}`
+    const insertion = insertionPoint(source, node, position)
+    const prefix = position === 'inside' ? `\n${insertion.indent}` : insertion.indent
+    const suffix = position === 'inside' ? `\n${insertion.closingIndent ?? ''}` : '\n'
+    const result = `${source.slice(0, insertion.offset)}${prefix}${markup}${suffix}${source.slice(insertion.replaceEnd)}`
     const reparsed = parseDesignerDocument(result)
     const parseError = reparsed.diagnostics.find((item) => item.severity === 'error')
     if (parseError) throw new Error(parseError.message)
