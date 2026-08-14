@@ -34,6 +34,7 @@ describe('preview protocol validation', () => {
   })
 
   it('accepts AI prompt actions only for a selected node', () => {
+    expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'select', nodeId: null })).toBe(true)
     expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'ai-prompt', nodeId: 'node-1' })).toBe(true)
     expect(isPreviewToEditorMessage({ channel: 'vue-designer', session: 'session', type: 'ai-prompt', nodeId: null })).toBe(false)
   })

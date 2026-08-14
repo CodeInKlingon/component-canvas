@@ -243,6 +243,10 @@ const setPanKeyPressed = (pressed) => {
   send({ type: 'pan-key-state', pressed })
 }
 document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && selectionEnabled) {
+    send({ type: 'select', nodeId: null })
+    select(null)
+  }
   if (event.code !== 'Space' || isKeyboardTarget(event.target)) return
   event.preventDefault()
   setPanKeyPressed(true)
@@ -371,9 +375,13 @@ document.addEventListener('click', (event) => {
   if (!selectionEnabled) return
   const target = event.target instanceof Element ? event.target.closest('[data-vue-designer-id]') : null
   const nodeId = target?.getAttribute('data-vue-designer-id')
-  if (!nodeId) return
   event.preventDefault()
   event.stopPropagation()
+  if (!nodeId) {
+    send({ type: 'select', nodeId: null })
+    select(null)
+    return
+  }
   send({ type: 'select', nodeId })
   select(nodeId)
 }, true)
@@ -410,6 +418,9 @@ addEventListener('message', (event) => {
     if (nodeId) {
       send({ type: 'select', nodeId })
       select(nodeId)
+    } else {
+      send({ type: 'select', nodeId: null })
+      select(null)
     }
   }
   if (message.type === 'restore-viewport' && Number.isFinite(message.scrollX) && Number.isFinite(message.scrollY)) {

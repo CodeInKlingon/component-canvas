@@ -106,6 +106,7 @@ let panPointerId: number | undefined
 let panStart = { x: 0, y: 0, panX: 0, panY: 0 }
 let wheelPanActiveUntil = 0
 let wheelPanTimer: number | undefined
+let escapeDeselecting = false
 
 const selectedNode = computed(() => findNode(activeDocument.value?.tree ?? [], selectedNodeId.value))
 const selectedComponent = computed(() => selectedNode.value?.kind === 'component'
@@ -730,6 +731,19 @@ function selectNode(node: DesignerNode, revealInSource = true): void {
   }
 }
 
+function deselectNode(): void {
+  aiPromptOpen.value = false
+  selectedNodeId.value = null
+  activeStyleSelector.value = ''
+  computedStyles.value = {}
+  previewFrame.value?.contentWindow?.postMessage({
+    channel: 'vue-designer',
+    session: previewSession.value,
+    type: 'select',
+    nodeId: null,
+  }, '*')
+}
+
 function revealAncestors(node: DesignerNode): void {
   const tree = activeDocument.value?.tree
   if (!tree) return
@@ -764,6 +778,7 @@ function replaceTree(nextTree: DesignerNode[]): void {
 }
 
 function syncSelectionFromSource(offset: number): void {
+  if (escapeDeselecting) return
   const match = findNodeAtOffset(activeDocument.value?.tree ?? [], offset)
   if (match) selectNode(match, false)
 }
@@ -826,6 +841,10 @@ function handlePreviewMessage(event: MessageEvent): void {
   }
   if (event.data.type === 'computed-style') {
     if (event.data.nodeId === selectedNodeId.value) computedStyles.value = event.data.styles
+    return
+  }
+  if (event.data.type === 'select' && event.data.nodeId === null) {
+    deselectNode()
     return
   }
   const node = findNode(activeDocument.value?.tree ?? [], event.data.nodeId)
@@ -1008,7 +1027,11 @@ function handleShortcut(event: KeyboardEvent): void {
     spacePressed.value = true
     event.preventDefault()
   }
-  if (event.key === 'Escape') closeContextMenu()
+  if (event.key === 'Escape') {
+    escapeDeselecting = true
+    closeContextMenu()
+    deselectNode()
+  }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
     event.preventDefault()
     void save()
@@ -1033,6 +1056,11 @@ function handleShortcut(event: KeyboardEvent): void {
 
 function handleKeyUp(event: KeyboardEvent): void {
   if (event.code === 'Space') spacePressed.value = false
+  if (event.key === 'Escape') {
+    requestAnimationFrame(() => {
+      escapeDeselecting = false
+    })
+  }
 }
 
 import.meta.hot?.on('vue-designer:document-changed', handleExternalChange)
