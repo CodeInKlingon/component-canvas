@@ -110,7 +110,7 @@ export default function vue(options: VueDesignerOptions = {}) {
       resolveCandidateId: resolveCandidateFileId,
       createDocumentId: createPreviewDocumentId,
       isDocumentId(id: string, absolutePath: string) {
-        return id === createPreviewDocumentId(absolutePath)
+        return id.replaceAll('\\', '/') === createPreviewDocumentId(absolutePath).replaceAll('\\', '/')
       },
       createEntry(context: { documentImport: string; appImport?: string }) {
         return `

@@ -14,6 +14,10 @@ describe('Vue preview identities', () => {
   it('uses a separate module identity for saved previews', () => {
     expect(createPreviewDocumentId('C:/project/src/Page.vue'))
       .toBe('C:/project/src/Page.vue?vue-designer-preview')
+    expect(vue().preview.isDocumentId(
+      'C:/project/src/Page.vue?vue-designer-preview',
+      'C:\\project\\src\\Page.vue',
+    )).toBe(true)
   })
 
   it('defines Vue runtime feature flags for transforms and dependency optimization', () => {
