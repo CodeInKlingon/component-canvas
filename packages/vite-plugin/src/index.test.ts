@@ -1,21 +1,33 @@
 import { describe, expect, it } from 'vitest'
-import vueDesigner, { candidateIdFromFile, createCandidateFileId, createPreviewDocumentId } from './index'
+import designer, { type DesignerFramework } from './index'
 
-describe('vueDesigner', () => {
-  it('creates a named pre plugin', () => {
-    const plugin = vueDesigner({ documents: 'src/**/*.vue' })
+const framework: DesignerFramework = {
+  id: 'fake',
+  client: {
+    id: 'fake', sourceLanguage: 'text', fileExtension: '.fake', documentLabel: 'Fake document',
+    capabilities: { styles: false, components: false, ai: false },
+  },
+  parse: () => ({ tree: [], diagnostics: [] }),
+  applySourceOperation: (context) => ({ source: context.source }),
+  instrument: (context) => ({ code: context.code, map: null }),
+  preview: {
+    createCandidateId: (path, id) => `${path}?candidate=${id}`,
+    resolveCandidateId: () => undefined,
+    createDocumentId: (path) => `${path}?preview`,
+    isDocumentId: (id, path) => id === `${path}?preview`,
+    createEntry: () => '',
+  },
+}
+
+describe('designer', () => {
+  it('creates a named pre plugin around an injected framework', () => {
+    const plugins = designer({ framework, documents: 'src/**/*.fake' }) as unknown[]
+    const plugin = plugins[0] as { name: string; enforce: string }
     expect(plugin.name).toBe('vue-designer')
     expect(plugin.enforce).toBe('pre')
   })
 
-  it('keeps candidate identity in Vue style subrequests', () => {
-    const id = createCandidateFileId('C:/project/src/Page.vue', 'candidate-123')
-    expect(id).toBe('C:/project/src/Page.vue.vue-designer-candidate-candidate-123.vue')
-    expect(candidateIdFromFile(`${id}?vue&type=style&index=0&lang.css`)).toBe('candidate-123')
-    expect(candidateIdFromFile('C:/project/src/Page.vue?vue&type=style')).toBeUndefined()
-  })
-
-  it('uses a separate module identity for saved-document previews', () => {
-    expect(createPreviewDocumentId('C:/project/src/Page.vue')).toBe('C:/project/src/Page.vue?vue-designer-preview')
+  it('requires explicit framework support', () => {
+    expect(() => designer({ documents: 'src/**/*' } as never)).toThrow('framework')
   })
 })

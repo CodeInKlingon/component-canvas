@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@vue-designer/vite": "workspace:*",
-    "@vitejs/plugin-vue": "^5.2.4",
+    "@vue-designer/vue": "workspace:*",
     "vite": "^6.3.5",
     "vue": "^3.5.17"
   },

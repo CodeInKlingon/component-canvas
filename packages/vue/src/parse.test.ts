@@ -3,15 +3,36 @@ import { applySourceOperation, applySourceOperationWithResult, instrumentDesigne
 import { applyStyleOperation, getDesignerStyleRules } from './style'
 
 describe('parseDesignerDocument', () => {
+  it('reports malformed and incomplete SFC templates without throwing', () => {
+    expect(parseDesignerDocument('<template><main>').diagnostics.length).toBeGreaterThan(0)
+    expect(parseDesignerDocument('<template><main></template>').diagnostics.length).toBeGreaterThan(0)
+  })
+
+  it('preserves script variants, TypeScript, comments, and unusual formatting during edits', () => {
+    const source = `<script lang="ts">\nexport default { name: 'Page' }\n</script>\n<script setup lang="ts">\nconst count: number = 1\n</script>\n<template>\n<!-- keep -->\n<main\n  id="page"\n>Text</main>\n</template>`
+    const main = parseDesignerDocument(source).tree[0]!
+    const result = applySourceOperation(source, { type: 'set-attribute', nodeId: main.id, name: 'id', value: 'updated' })
+    expect(result).toContain(`const count: number = 1`)
+    expect(result).toContain('<!-- keep -->')
+    expect(result).toContain('id="updated"')
+    expect(parseDesignerDocument(result).diagnostics).toEqual([])
+  })
+
   it('builds a tree and locks structural directives', () => {
     const source = `<template><main><Card title="One">Hello</Card><p v-for="item in items">{{ item }}</p></main></template>`
     const result = parseDesignerDocument(source)
 
     expect(result.diagnostics).toEqual([])
-    expect(result.tree[0]).toMatchObject({ id: 'node-0', kind: 'element', label: 'main' })
-    expect(result.tree[0]?.children[0]).toMatchObject({ kind: 'component', label: 'Card' })
-    expect(result.tree[0]?.children[0]?.children[0]).toMatchObject({ kind: 'text', label: 'Hello' })
-    expect(result.tree[0]?.children[1]).toMatchObject({ editable: false })
+    expect(result.tree[0]).toMatchObject({ id: 'node-0', kind: 'element', label: 'main', capabilities: { canContainChildren: true } })
+    expect(result.tree[0]?.children[0]).toMatchObject({ kind: 'component', label: 'Card', capabilities: { canContainChildren: true } })
+    expect(result.tree[0]?.children[0]?.children[0]).toMatchObject({ kind: 'text', label: 'Hello', capabilities: { canContainChildren: false } })
+    expect(result.tree[0]?.children[1]).toMatchObject({ editable: false, capabilities: { canContainChildren: false } })
+  })
+
+  it('normalizes void-element containment support', () => {
+    const nodes = parseDesignerDocument('<template><main><img><Widget /></main></template>').tree[0]!.children
+    expect(nodes[0]?.capabilities.canContainChildren).toBe(false)
+    expect(nodes[1]?.capabilities.canContainChildren).toBe(true)
   })
 
   it('updates text and supported attributes by source range', () => {

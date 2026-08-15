@@ -3,7 +3,16 @@ import type { DesignerNode } from '@vue-designer/shared'
 import { findNodeAtOffset, findNodeAtPath, findNodePath, findRenderedSelection, reconcileCollapsedTree } from './selection'
 
 function node(id: string, start: number, end: number, children: DesignerNode[] = []): DesignerNode {
-  return { id, kind: 'element', label: id, range: { start, end }, editable: true, attributes: [], children }
+  return {
+    id,
+    kind: 'element',
+    label: id,
+    range: { start, end },
+    editable: true,
+    capabilities: { canContainChildren: true },
+    attributes: [],
+    children,
+  }
 }
 
 describe('selection reconciliation', () => {

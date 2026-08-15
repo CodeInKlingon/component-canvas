@@ -1,11 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { parseDesignerDocument } from '@vue-designer/shared'
+import type { DesignerNode } from '@vue-designer/shared'
 import { parseNodeClipboard, serializeNodeClipboard } from './node-clipboard'
 
 describe('node clipboard payloads', () => {
   it('serializes the exact selected node source', () => {
     const source = '<template><Card :count="count"><strong>Title</strong></Card></template>'
-    const node = parseDesignerDocument(source).tree[0]!
+    const node: DesignerNode = {
+      id: 'node-0',
+      kind: 'component',
+      label: 'Card',
+      range: { start: source.indexOf('<Card'), end: source.indexOf('</template>') },
+      editable: true,
+      capabilities: { canContainChildren: true },
+      attributes: [],
+      children: [],
+    }
     expect(parseNodeClipboard(serializeNodeClipboard(node, source))).toEqual({
       kind: 'vue-designer-node', version: 1, nodeKind: 'component',
       source: '<Card :count="count"><strong>Title</strong></Card>',

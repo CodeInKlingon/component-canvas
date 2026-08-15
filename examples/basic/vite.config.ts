@@ -1,11 +1,11 @@
 import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
 import designer from '@vue-designer/vite'
+import vue from '@vue-designer/vue'
 
 export default defineConfig({
   plugins: [
-    vue(),
     designer({
+      framework: vue(),
       documents: 'src/pages/**/*.vue',
       app: './src/designer-app.ts',
       components: './src/designer-components.ts',

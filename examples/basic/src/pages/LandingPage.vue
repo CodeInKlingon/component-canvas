@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import AppButton from '../components/AppButton.vue'
 import FeatureCard from '../components/FeatureCard.vue'
+import NoticeBadge from '../components/NoticeBadge.vue'
 </script>
 
 <template>
@@ -12,10 +13,13 @@ import FeatureCard from '../components/FeatureCard.vue'
     </nav>
 
     <section class="hero">
+      <NoticeBadge :subtle="true">Beta</NoticeBadge>
       <p class="eyebrow">A calmer way to make software</p>
       <h1>Ideas deserve<br><em>room to grow.</em></h1>
       <p class="intro">Shape thoughtful digital products with a toolkit made for clarity, collaboration, and momentum.</p>
-      <AppButton>Explore the toolkit</AppButton>
+      <AppButton>Explore the toolkit
+      </AppButton>
+      
     </section>
 
     <section class="features">

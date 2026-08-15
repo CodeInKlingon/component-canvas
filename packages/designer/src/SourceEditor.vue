@@ -4,7 +4,13 @@ import type { Editor } from '@pierre/diffs/edit'
 import type { File } from '@pierre/diffs'
 import { offsetAt, positionAt } from './source-position'
 
-const props = defineProps<{ source: string; disabled?: boolean }>()
+const props = defineProps<{
+  source: string
+  fileName: string
+  language: string
+  documentLabel: string
+  disabled?: boolean
+}>()
 const emit = defineEmits<{
   input: [source: string]
   blur: []
@@ -58,7 +64,7 @@ onMounted(async () => {
     useTokenTransformer: true,
     overflow: 'scroll',
   })
-  file.render({ file: { name: 'document.vue', contents: props.source, lang: 'vue' }, containerWrapper: host })
+  file.render({ file: { name: props.fileName, contents: props.source, lang: props.language }, containerWrapper: host })
   detach = editor.edit(file)
   host.addEventListener('keyup', syncCursor)
   host.addEventListener('pointerup', syncCursor)
@@ -109,7 +115,7 @@ defineExpose({ focus, setSelectionRange })
       <div v-if="loading" class="source-editor-loading">Loading source editor...</div>
     </div>
     <div class="source-editor-status">
-      <span>Vue SFC</span>
+      <span>{{ documentLabel }}</span>
       <span>Ln {{ cursorPosition.line }}, Col {{ cursorPosition.column }}</span>
     </div>
   </div>

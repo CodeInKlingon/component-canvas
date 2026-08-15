@@ -10,6 +10,18 @@ export interface DesignerDocument extends DesignerDocumentSummary {
   diagnostics: DesignerDiagnostic[]
 }
 
+export interface DesignerFrameworkClientMetadata {
+  id: string
+  sourceLanguage: string
+  fileExtension: string
+  documentLabel: string
+  capabilities: {
+    styles: boolean
+    components: boolean
+    ai: boolean
+  }
+}
+
 export interface DesignerSourceRange {
   start: number
   end: number
@@ -28,9 +40,19 @@ export interface DesignerNode {
   value?: string
   range: DesignerSourceRange
   editable: boolean
+  capabilities: DesignerNodeCapabilities
   lockedReason?: string
   attributes: DesignerAttribute[]
   children: DesignerNode[]
+}
+
+export interface DesignerNodeCapabilities {
+  canContainChildren: boolean
+}
+
+export interface ParsedDesignerDocument {
+  tree: DesignerNode[]
+  diagnostics: DesignerDiagnostic[]
 }
 
 export interface DesignerAttribute {
@@ -64,6 +86,9 @@ export interface PreviewCandidateResponse {
   candidateId: string
   tree: DesignerNode[]
   diagnostics: DesignerDiagnostic[]
+}
+
+export interface DesignerSourceCandidateResponse extends PreviewCandidateResponse, DesignerSourceOperationResult {
 }
 
 export interface DesignerAiRequest {
@@ -157,10 +182,58 @@ export type DesignerSourceOperation =
       position: 'before' | 'inside' | 'after'
     }
 
-const voidElements = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'])
+export interface DesignerSourceOperationResult {
+  source: string
+  selectionOffset?: number
+}
 
-export function isVoidElement(tag: string): boolean {
-  return voidElements.has(tag.toLowerCase())
+export class DesignerOperationError extends Error {
+  override name = 'DesignerOperationError'
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isStringRecord(value: unknown): value is Record<string, string | number | boolean> {
+  return isRecord(value) && Object.values(value).every((item) =>
+    typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean',
+  )
+}
+
+export function isDesignerSourceOperation(value: unknown): value is DesignerSourceOperation {
+  if (!isRecord(value) || typeof value.type !== 'string') return false
+  const string = (key: string) => typeof value[key] === 'string'
+  const optionalString = (key: string) => value[key] === undefined || string(key)
+  const position = (allowed: string[]) => value.position === undefined || allowed.includes(String(value.position))
+
+  switch (value.type) {
+    case 'set-text':
+      return string('nodeId') && string('value')
+    case 'set-attribute':
+      return string('nodeId') && string('name')
+        && (value.value === null || ['string', 'number', 'boolean'].includes(typeof value.value))
+        && (value.binding === undefined || typeof value.binding === 'boolean')
+    case 'insert-component':
+      return string('parentId') && string('name') && string('importSource')
+        && optionalString('defaultContent') && position(['inside', 'after'])
+    case 'insert-native':
+      return string('parentId') && string('tag')
+        && ['normal', 'text', 'void'].includes(String(value.contentModel))
+        && optionalString('defaultContent') && optionalString('defaultChildren')
+        && (value.attributes === undefined || isStringRecord(value.attributes))
+        && position(['inside', 'after'])
+    case 'remove-node':
+    case 'duplicate-node':
+      return string('nodeId')
+    case 'insert-node':
+      return string('targetId') && ['inside', 'after'].includes(String(value.position)) && string('source')
+    case 'move-node':
+      return string('nodeId') && string('targetId')
+        && ['before', 'inside', 'after'].includes(String(value.position))
+    default:
+      return false
+  }
 }
 
 export type PreviewToEditorMessage =
@@ -220,5 +293,3 @@ export function isEditorToPreviewMessage(value: unknown): value is EditorToPrevi
   return message.type === 'apply-style' && typeof message.nodeId === 'string'
     && typeof message.property === 'string' && (message.value === null || typeof message.value === 'string')
 }
-
-export { applySourceOperation, applySourceOperationWithResult, instrumentDesignerNodes, parseDesignerDocument } from './parse.js'

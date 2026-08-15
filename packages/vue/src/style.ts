@@ -1,6 +1,6 @@
 import { parse as parseSfc } from '@vue/compiler-sfc'
 import postcss, { type Declaration, type Rule } from 'postcss'
-import type { DesignerNode, DesignerStyleOperation, DesignerStyleRule } from './index.js'
+import type { DesignerNode, DesignerStyleOperation, DesignerStyleRule } from '@vue-designer/shared'
 import { applySourceOperation, parseDesignerDocument } from './parse.js'
 
 function findNode(nodes: DesignerNode[], nodeId: string): DesignerNode | undefined {

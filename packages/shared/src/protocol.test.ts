@@ -1,5 +1,26 @@
 import { describe, expect, it } from 'vitest'
-import { isEditorToPreviewMessage, isPreviewToEditorMessage } from './index'
+import { isDesignerSourceOperation, isEditorToPreviewMessage, isPreviewToEditorMessage } from './index'
+
+describe('source operation validation', () => {
+  it('accepts every supported operation shape', () => {
+    expect(isDesignerSourceOperation({ type: 'set-text', nodeId: 'node-1', value: 'Text' })).toBe(true)
+    expect(isDesignerSourceOperation({ type: 'set-attribute', nodeId: 'node-1', name: 'count', value: 2, binding: true })).toBe(true)
+    expect(isDesignerSourceOperation({ type: 'insert-component', parentId: 'node-1', name: 'Card', importSource: './Card.vue', position: 'inside' })).toBe(true)
+    expect(isDesignerSourceOperation({ type: 'insert-native', parentId: 'node-1', tag: 'input', contentModel: 'void', attributes: { disabled: true } })).toBe(true)
+    expect(isDesignerSourceOperation({ type: 'remove-node', nodeId: 'node-1' })).toBe(true)
+    expect(isDesignerSourceOperation({ type: 'duplicate-node', nodeId: 'node-1' })).toBe(true)
+    expect(isDesignerSourceOperation({ type: 'insert-node', targetId: 'node-1', position: 'after', source: '<p />' })).toBe(true)
+    expect(isDesignerSourceOperation({ type: 'move-node', nodeId: 'node-1', targetId: 'node-2', position: 'before' })).toBe(true)
+  })
+
+  it('rejects malformed nested values and discriminants', () => {
+    expect(isDesignerSourceOperation({ type: 'set-attribute', nodeId: 'node-1', name: 'count', value: [] })).toBe(false)
+    expect(isDesignerSourceOperation({ type: 'insert-native', parentId: 'node-1', tag: 'div', contentModel: 'other' })).toBe(false)
+    expect(isDesignerSourceOperation({ type: 'insert-native', parentId: 'node-1', tag: 'div', contentModel: 'normal', attributes: { id: null } })).toBe(false)
+    expect(isDesignerSourceOperation({ type: 'move-node', nodeId: 'node-1', targetId: 'node-2', position: 'around' })).toBe(false)
+    expect(isDesignerSourceOperation({ type: 'unknown' })).toBe(false)
+  })
+})
 
 describe('preview protocol validation', () => {
   it('requires a session on every message', () => {

@@ -18,6 +18,7 @@ Vue Designer is a web-based WYSIWYG editor for arranging, configuring, and styli
 - `packages/designer`: Vue editor UI, document tree, palettes, inspectors, history, source editor, and iframe canvas
 - `packages/shared`: framework-neutral document model, protocol types and validation, SFC parsing, and minimal source/style mutations
 - `packages/vite-plugin`: Vite integration, virtual preview modules, component metadata, guarded filesystem APIs, file watching, and preview isolation
+- `packages/vue`: Vue SFC parsing, mutation, styles, preview mounting, metadata, AI language behavior, and Vue Vite integration
 - `examples/basic`: sample Vue/Vite project used for development and browser verification
 - `docs/tickets`: ordered feature slices and acceptance criteria
 

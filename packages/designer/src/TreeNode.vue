@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { ChevronRight, CodeXml, Component, ComponentIcon, Type } from '@lucide/vue'
-import { isVoidElement, type DesignerNode } from '@vue-designer/shared'
+import type { DesignerNode } from '@vue-designer/shared'
 
 const props = defineProps<{
   node: DesignerNode
@@ -38,8 +38,7 @@ function canDrop(intent: DropIntent): boolean {
       && props.node.children.at(-1)?.id === props.draggedNode.id
     if (isAlreadyLastChild) return false
   }
-  if ((intent === 'inside' || intent === 'append')
-    && (props.node.kind === 'text' || (props.node.kind === 'element' && isVoidElement(props.node.label)))) return false
+  if ((intent === 'inside' || intent === 'append') && !props.node.capabilities.canContainChildren) return false
   if ((intent === 'before' || intent === 'after') && props.dragKind === 'component') return false
   return true
 }
@@ -146,7 +145,7 @@ function handleChildContextMenu(event: MouseEvent, node: DesignerNode): void {
     </ul>
     <div
       class="tree-drop-line tree-drop-line--append"
-      :class="{ active: dropIntent === 'append', available: node.kind !== 'text' && !(node.kind === 'element' && isVoidElement(node.label)) && !!dragKind }"
+      :class="{ active: dropIntent === 'append', available: node.capabilities.canContainChildren && !!dragKind }"
       :style="{ marginLeft: `${45 + (depth ?? 0) * 15}px` }"
       @dragover="handleDragOver($event, 'append')"
       @dragleave="handleDragLeave($event, 'append')"

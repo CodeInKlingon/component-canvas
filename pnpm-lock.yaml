@@ -17,12 +17,12 @@ importers:
 
   examples/basic:
     dependencies:
-      '@vitejs/plugin-vue':
-        specifier: ^5.2.4
-        version: 5.2.4(vite@6.4.3(@types/node@24.13.3))(vue@3.5.41(typescript@5.9.3))
       '@vue-designer/vite':
         specifier: workspace:*
         version: link:../../packages/vite-plugin
+      '@vue-designer/vue':
+        specifier: workspace:*
+        version: link:../../packages/vue
       vite:
         specifier: ^6.3.5
         version: 6.4.3(@types/node@24.13.3)
@@ -72,16 +72,6 @@ importers:
         version: 2.2.12(typescript@5.9.3)
 
   packages/shared:
-    dependencies:
-      '@vue/compiler-dom':
-        specifier: ^3.5.17
-        version: 3.5.41
-      '@vue/compiler-sfc':
-        specifier: ^3.5.17
-        version: 3.5.41
-      postcss:
-        specifier: ^8.5.6
-        version: 8.5.26
     devDependencies:
       typescript:
         specifier: ^5.8.3
@@ -101,6 +91,40 @@ importers:
       fast-glob:
         specifier: ^3.3.3
         version: 3.3.3
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.3
+        version: 24.13.3
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+      vite:
+        specifier: ^6.3.5
+        version: 6.4.3(@types/node@24.13.3)
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@24.13.3)
+
+  packages/vue:
+    dependencies:
+      '@vitejs/plugin-vue':
+        specifier: ^5.2.4
+        version: 5.2.4(vite@6.4.3(@types/node@24.13.3))(vue@3.5.41(typescript@5.9.3))
+      '@vue-designer/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@vue/compiler-dom':
+        specifier: ^3.5.17
+        version: 3.5.41
+      '@vue/compiler-sfc':
+        specifier: ^3.5.17
+        version: 3.5.41
+      postcss:
+        specifier: ^8.5.6
+        version: 8.5.26
+      vue:
+        specifier: ^3.5.0
+        version: 3.5.41(typescript@5.9.3)
       vue-component-meta:
         specifier: ^3.3.9
         version: 3.3.9(typescript@5.9.3)

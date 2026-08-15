@@ -1,11 +1,13 @@
 import { NodeTypes, parse as parseTemplate, type TemplateChildNode } from '@vue/compiler-dom'
 import { parse as parseSfc } from '@vue/compiler-sfc'
-import type { DesignerAttribute, DesignerDiagnostic, DesignerNode, DesignerSourceOperation } from './index.js'
-
-export interface ParsedDesignerDocument {
-  tree: DesignerNode[]
-  diagnostics: DesignerDiagnostic[]
-}
+import type {
+  DesignerAttribute,
+  DesignerDiagnostic,
+  DesignerNode,
+  DesignerSourceOperation,
+  DesignerSourceOperationResult,
+  ParsedDesignerDocument,
+} from '@vue-designer/shared'
 
 interface ParseState {
   nextId: number
@@ -36,6 +38,7 @@ function convertChildren(children: TemplateChildNode[], state: ParseState, ances
           end: state.templateOffset + child.loc.end.offset,
         },
         editable: !ancestorLock,
+        capabilities: { canContainChildren: false },
         lockedReason: ancestorLock,
         attributes: [],
         children: [],
@@ -97,6 +100,7 @@ function convertChildren(children: TemplateChildNode[], state: ParseState, ances
         end: state.templateOffset + child.loc.end.offset,
       },
       editable: !lockedReason,
+      capabilities: { canContainChildren: !lockedReason && !voidTags.has(child.tag.toLowerCase()) },
       lockedReason,
       attributes,
       children: convertChildren(child.children, state, lockedReason),
@@ -201,11 +205,6 @@ function escapeText(value: string): string {
 
 function escapeAttribute(value: string): string {
   return escapeText(value).replaceAll('"', '&quot;')
-}
-
-export interface DesignerSourceOperationResult {
-  source: string
-  selectionOffset?: number
 }
 
 export function applySourceOperation(source: string, operation: DesignerSourceOperation): string {

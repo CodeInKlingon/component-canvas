@@ -4,8 +4,7 @@ import { createServer, request as httpRequest, type IncomingMessage, type Server
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fg from 'fast-glob'
-import { createChecker, type ComponentMetaChecker, type PropertyMetaSchema } from 'vue-component-meta'
-import { loadEnv, type Plugin, type ResolvedConfig } from 'vite'
+import { loadEnv, type Plugin, type PluginOption, type ResolvedConfig, type UserConfig, type ViteDevServer } from 'vite'
 import type {
   DesignerDocument,
   DesignerDocumentSummary,
@@ -15,15 +14,56 @@ import type {
   DesignerDocumentChangedEvent,
   DesignerAiRequest,
   DesignerAiResponse,
+  DesignerSourceCandidateResponse,
+  DesignerSourceOperation,
+  DesignerSourceOperationResult,
+  DesignerFrameworkClientMetadata,
+  DesignerStyleRule,
+  ParsedDesignerDocument,
   PreviewCandidateResponse,
   SaveDocumentRequest,
 } from '@vue-designer/shared'
-import { instrumentDesignerNodes, parseDesignerDocument } from '@vue-designer/shared'
-import { applyStyleOperation, getDesignerStyleRules } from '@vue-designer/shared/style'
+import { DesignerOperationError, isDesignerSourceOperation } from '@vue-designer/shared'
 import { CapabilityStore } from './capabilities.js'
-import { generateVueSource, type CursorAiOptions } from './ai.js'
+import { runAiPrompt, type CursorAiOptions } from './ai.js'
 
-export interface VueDesignerOptions {
+export interface DesignerDocumentContext {
+  path: string
+  absolutePath: string
+  source: string
+}
+
+export interface DesignerFramework {
+  id: string
+  client: DesignerFrameworkClientMetadata
+  vite?: PluginOption
+  config?: UserConfig
+  parse(context: DesignerDocumentContext): ParsedDesignerDocument
+  applySourceOperation(context: DesignerDocumentContext, operation: DesignerSourceOperation): DesignerSourceOperationResult
+  instrument(context: DesignerDocumentContext & { id: string; code: string; candidateId?: string }): { code: string; map: null }
+  preview: {
+    createCandidateId(absolutePath: string, candidateId: string): string
+    resolveCandidateId(id: string): { candidateId: string; root: boolean } | undefined
+    createDocumentId(absolutePath: string): string
+    isDocumentId(id: string, absolutePath: string): boolean
+    createEntry(context: { documentImport: string; appImport?: string }): string
+  }
+  styles?: {
+    getRules(context: DesignerDocumentContext, nodeId: string): DesignerStyleRule[]
+    applyOperation(context: DesignerDocumentContext, operation: DesignerStyleOperation): string
+  }
+  components?: {
+    load(context: { config: ResolvedConfig; server: ViteDevServer; registryPath: string }): Promise<DesignerComponentMetadata[]>
+  }
+  ai?: {
+    createPrompt(request: DesignerAiRequest): string
+    extractSource(result: string): string
+    invalidSourceMessage(message: string): string
+  }
+}
+
+export interface DesignerOptions {
+  framework: DesignerFramework
   documents: string | string[]
   app?: string
   components?: string
@@ -34,22 +74,6 @@ export interface VueDesignerOptions {
 const designerEntry = fileURLToPath(
   new URL('../../designer/src/main.ts', import.meta.url),
 )
-const candidateFileMarker = '.vue-designer-candidate-'
-
-export function createCandidateFileId(absolutePath: string, candidateId: string): string {
-  return `${absolutePath}${candidateFileMarker}${candidateId}.vue`
-}
-
-export function createPreviewDocumentId(absolutePath: string): string {
-  return `${absolutePath}?vue-designer-preview`
-}
-
-export function candidateIdFromFile(id: string): string | undefined {
-  const file = id.split('?')[0] ?? id
-  const marker = file.lastIndexOf(candidateFileMarker)
-  if (marker < 0 || !file.endsWith('.vue')) return
-  return file.slice(marker + candidateFileMarker.length, -4)
-}
 
 function revision(source: string): string {
   return createHash('sha256').update(source).digest('hex')
@@ -88,6 +112,17 @@ function isCandidateRequest(value: unknown): value is { path: string; source: st
   return typeof candidate.path === 'string' && typeof candidate.source === 'string'
 }
 
+function isSourceCandidateRequest(value: unknown): value is {
+  path: string
+  source: string
+  operation: DesignerSourceOperation
+} {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return typeof candidate.path === 'string' && typeof candidate.source === 'string'
+    && isDesignerSourceOperation(candidate.operation)
+}
+
 function isStyleRequest(value: unknown): value is { path: string; source: string; operation: DesignerStyleOperation } {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Record<string, unknown>
@@ -107,35 +142,12 @@ function isAiRequest(value: unknown): value is DesignerAiRequest {
     && !!range && Number.isInteger(range.start) && Number.isInteger(range.end)
 }
 
-function literalOptions(schema: PropertyMetaSchema): string[] {
-  if (typeof schema === 'string') return []
-  if (schema.kind === 'literal') return [schema.value.replace(/^(['"])(.*)\1$/, '$2')]
-  if (schema.kind === 'enum') {
-    return (schema.schema ?? []).flatMap((value) => typeof value === 'string'
-      ? [value.replace(/^(['"])(.*)\1$/, '$2')]
-      : literalOptions(value))
-  }
-  return []
-}
-
-function inferControl(type: string, schema: PropertyMetaSchema): {
-  control: 'text' | 'number' | 'checkbox' | 'select'
-  options?: string[]
-} {
-  const options = literalOptions(schema).filter((value) => value !== 'undefined')
-  if (/(^|\W)boolean(\W|$)/.test(type)) return { control: 'checkbox' }
-  if (/(^|\W)number(\W|$)/.test(type)) return { control: 'number' }
-  if (options.length > 1) return { control: 'select', options }
-  return { control: 'text' }
-}
-
-export default function vueDesigner(options: VueDesignerOptions): Plugin {
+function createDesignerPlugin(options: DesignerOptions): Plugin {
   let config: ResolvedConfig
   let documentFiles = new Map<string, string>()
   const previewEntryPrefix = '\0vue-designer:preview-entry?'
   const candidates = new Map<string, { path: string; source: string }>()
   const capabilities = new CapabilityStore()
-  let componentChecker: ComponentMetaChecker | undefined
   let previewOrigin = ''
   let cursorAiOptions: CursorAiOptions | undefined
 
@@ -168,42 +180,41 @@ export default function vueDesigner(options: VueDesignerOptions): Plugin {
     return documentFiles.get(relativePath)
   }
 
+  function context(path: string, absolutePath: string, source: string): DesignerDocumentContext {
+    return { path, absolutePath, source }
+  }
+
+  function storeCandidate(path: string, source: string): string {
+    const candidateId = randomUUID()
+    candidates.set(candidateId, { path, source })
+    if (candidates.size > 50) candidates.delete(candidates.keys().next().value!)
+    return candidateId
+  }
+
   return {
     name: 'vue-designer',
     enforce: 'pre',
     config() {
-      const vueFeatureFlags = {
-        __VUE_OPTIONS_API__: 'true',
-        __VUE_PROD_DEVTOOLS__: 'false',
-        __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: 'false',
-      }
-      return {
-        define: vueFeatureFlags,
-        optimizeDeps: {
-          esbuildOptions: {
-            define: vueFeatureFlags,
-          },
-        },
-      }
+      return options.framework.config
     },
     async resolveId(id) {
-      if (candidateIdFromFile(id)) return id
+      if (options.framework.preview.resolveCandidateId(id)) return id
       if (id.startsWith('/__designer/preview-entry.js?')) {
         return `${previewEntryPrefix}${id.slice(id.indexOf('?') + 1)}`
       }
-      if (id.startsWith('/__designer/candidate.vue?')) {
+      if (id.startsWith('/__designer/candidate?')) {
         const candidateId = new URLSearchParams(id.slice(id.indexOf('?') + 1)).get('id') ?? ''
         const candidate = candidates.get(candidateId)
         if (!candidate) throw new Error('Preview candidate expired')
         const absolutePath = await resolveDocument(candidate.path)
         if (!absolutePath) throw new Error('Preview document not found')
-        return createCandidateFileId(absolutePath, candidateId)
+        return options.framework.preview.createCandidateId(absolutePath, candidateId)
       }
     },
     async load(id) {
-      const virtualCandidateId = candidateIdFromFile(id)
-      if (virtualCandidateId && !id.includes('?vue&type=')) {
-        const candidate = candidates.get(virtualCandidateId)
+      const candidateReference = options.framework.preview.resolveCandidateId(id)
+      if (candidateReference?.root) {
+        const candidate = candidates.get(candidateReference.candidateId)
         if (!candidate) throw new Error('Preview candidate expired')
         return candidate.source
       }
@@ -221,10 +232,13 @@ export default function vueDesigner(options: VueDesignerOptions): Plugin {
 
       const appPath = options.app ? path.resolve(config.root, options.app) : null
       const documentImport = candidateId && candidate
-        ? `/__designer/candidate.vue?id=${encodeURIComponent(candidateId)}`
-        : createPreviewDocumentId(absolutePath)
+        ? `/__designer/candidate?id=${encodeURIComponent(candidateId)}`
+        : options.framework.preview.createDocumentId(absolutePath)
+      const frameworkEntry = options.framework.preview.createEntry({
+        documentImport,
+        appImport: appPath ?? undefined,
+      })
       return `
-import { createApp, h } from 'vue'
 const session = ${JSON.stringify(previewSession)}
 const send = (message) => parent.postMessage({ channel: 'vue-designer', session, ...message }, '*')
 const describe = (value) => value instanceof Error
@@ -242,6 +256,7 @@ const setPanKeyPressed = (pressed) => {
   panKeyPressed = pressed
   send({ type: 'pan-key-state', pressed })
 }
+
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && selectionEnabled) {
     send({ type: 'select', nodeId: null })
@@ -285,27 +300,7 @@ for (const level of ['warn', 'error']) {
   }
 }
 
-let Document
-let setup
-try {
-  [Document, setup] = await Promise.all([
-    import(${JSON.stringify(documentImport)}).then((module) => module.default),
-    ${appPath ? `import(${JSON.stringify(appPath)}).then((module) => module.default)` : 'Promise.resolve(null)'},
-  ])
-} catch (error) {
-  send({ type: 'diagnostic', level: 'error', ...describe(error) })
-  throw error
-}
-
-const app = createApp({ render: () => h(Document) })
-app.config.errorHandler = (error) => send({ type: 'diagnostic', level: 'error', ...describe(error) })
-try {
-  if (setup?.setup) await setup.setup(app)
-  app.mount('#app')
-  send({ type: 'ready' })
-} catch (error) {
-  send({ type: 'diagnostic', level: 'error', ...describe(error) })
-}
+${frameworkEntry}
 
 let selected
 let scrollFrame
@@ -344,7 +339,7 @@ function updateSelectionOverlay() {
   selectionOverlay.style.top = (rect.top - 2) + 'px'
   selectionOverlay.style.width = rect.width + 'px'
   selectionOverlay.style.height = rect.height + 'px'
-  aiButton.style.display = ${JSON.stringify(!!options.ai)} ? 'grid' : 'none'
+  aiButton.style.display = ${JSON.stringify(!!options.ai && !!options.framework.ai)} ? 'grid' : 'none'
   aiButton.style.left = Math.max(4, rect.right - 24) + 'px'
   aiButton.style.top = Math.max(4, rect.top - 34) + 'px'
 }
@@ -439,13 +434,17 @@ addEventListener('message', (event) => {
 `
     },
     transform(code, id) {
-      if (candidateIdFromFile(id) && !id.includes('?vue&type=')) return { code: instrumentDesignerNodes(code), map: null }
+      const candidateReference = options.framework.preview.resolveCandidateId(id)
+      if (candidateReference?.root) {
+        const candidate = candidates.get(candidateReference.candidateId)
+        const absolutePath = candidate ? documentFiles.get(candidate.path) : undefined
+        if (!candidate || !absolutePath) return
+        return options.framework.instrument({ ...context(candidate.path, absolutePath, candidate.source), id, code, candidateId: candidateReference.candidateId })
+      }
       const filePath = path.resolve(id.split('?')[0] ?? id)
-      const isDocument = [...documentFiles.values()].some(
-        (documentPath) => path.resolve(documentPath) === filePath,
-      )
-      if (!isDocument) return
-      return { code: instrumentDesignerNodes(code), map: null }
+      const document = [...documentFiles].find(([, documentPath]) => path.resolve(documentPath) === filePath)
+      if (!document || !options.framework.preview.isDocumentId(id, document[1])) return
+      return options.framework.instrument({ ...context(document[0], document[1], code), id, code })
     },
     configResolved(resolvedConfig) {
       config = resolvedConfig
@@ -567,7 +566,17 @@ export function injectQuery(url) { return url }
 
           if (request.method === 'GET' && url.pathname === '/__designer/api/config') {
             if (!previewOrigin) return json(response, 503, { error: 'Preview server is starting' })
-            return json(response, 200, { previewOrigin, aiEnabled: !!options.ai })
+            return json(response, 200, {
+              previewOrigin,
+              framework: {
+                ...options.framework.client,
+                capabilities: {
+                  styles: !!options.framework.styles,
+                  components: !!options.framework.components && !!options.components,
+                  ai: !!options.framework.ai && !!options.ai,
+                },
+              },
+            })
           }
 
           if (url.pathname.startsWith('/__designer/api/')
@@ -580,63 +589,26 @@ export function injectQuery(url) { return url }
           }
 
           if (request.method === 'GET' && url.pathname === '/__designer/api/components') {
+            if (!options.framework.components) {
+              return json(response, 404, { error: 'Component metadata is not supported by this framework' })
+            }
             if (!options.components) return json(response, 200, [])
             const registryPath = path.resolve(config.root, options.components)
-            const module = await server.ssrLoadModule(registryPath)
-            const registry = module.default as Record<string, Record<string, unknown>>
-            const components: DesignerComponentMetadata[] = Object.entries(registry).map(([name, entry]) => {
-              if (typeof entry.source !== 'string') {
-                throw new Error(`Component ${name} must define a source module`)
-              }
-              const absoluteSource = path.resolve(path.dirname(registryPath), entry.source)
-              componentChecker ??= createChecker(path.resolve(config.root, 'tsconfig.json'), { schema: true })
-              const inferred = componentChecker.getComponentMeta(absoluteSource)
-              const overrides = entry.props && typeof entry.props === 'object'
-                ? entry.props as Record<string, Record<string, unknown>>
-                : {}
-              return {
-                name,
-                label: typeof entry.label === 'string' ? entry.label : name,
-                category: typeof entry.category === 'string' ? entry.category : 'Components',
-                source: path.relative(config.root, absoluteSource).replaceAll('\\', '/'),
-                defaultContent: typeof entry.defaultContent === 'string' ? entry.defaultContent : undefined,
-                props: inferred.props.filter((prop) => !prop.global).map((prop) => {
-                  const inferredControl = inferControl(prop.type, prop.schema)
-                  const override = overrides[prop.name] ?? {}
-                  const control = ['text', 'number', 'checkbox', 'select', 'color'].includes(String(override.control))
-                    ? override.control as DesignerComponentMetadata['props'][number]['control']
-                    : inferredControl.control
-                  return {
-                    name: prop.name,
-                    type: prop.type,
-                    description: prop.description,
-                    required: prop.required,
-                    default: prop.default,
-                    control,
-                    options: Array.isArray(override.options)
-                      ? override.options.filter((value): value is string => typeof value === 'string')
-                      : inferredControl.options,
-                  }
-                }),
-                events: inferred.events.map((event) => ({ name: event.name, description: event.description })),
-                slots: inferred.slots.map((slot) => ({ name: slot.name, description: slot.description })),
-              }
-            })
+            const components = await options.framework.components.load({ config, server, registryPath })
             return json(response, 200, components)
           }
 
           if (request.method === 'POST' && url.pathname === '/__designer/api/candidate') {
             const body = await readBody(request)
-            if (!isCandidateRequest(body) || !await resolveDocument(body.path)) {
+            const absolutePath = isCandidateRequest(body) ? await resolveDocument(body.path) : undefined
+            if (!isCandidateRequest(body) || !absolutePath) {
               return json(response, 400, { error: 'Invalid preview candidate' })
             }
-            const parsed = parseDesignerDocument(body.source)
+            const parsed = options.framework.parse(context(body.path, absolutePath, body.source))
             const parseError = parsed.diagnostics.find((item) => item.severity === 'error')
             if (parseError) return json(response, 422, { error: parseError.message })
 
-            const candidateId = randomUUID()
-            candidates.set(candidateId, { path: body.path, source: body.source })
-            if (candidates.size > 50) candidates.delete(candidates.keys().next().value!)
+            const candidateId = storeCandidate(body.path, body.source)
             const result: PreviewCandidateResponse = {
               candidateId,
               tree: parsed.tree,
@@ -645,49 +617,89 @@ export function injectQuery(url) { return url }
             return json(response, 200, result)
           }
 
-          if (request.method === 'POST' && url.pathname === '/__designer/api/ai') {
-            if (!options.ai) return json(response, 404, { error: 'AI editing is not configured' })
+          if (request.method === 'POST' && url.pathname === '/__designer/api/source-candidate') {
             const body = await readBody(request)
-            if (!isAiRequest(body) || !await resolveDocument(body.path)
+            const absolutePath = isSourceCandidateRequest(body) ? await resolveDocument(body.path) : undefined
+            if (!isSourceCandidateRequest(body) || !absolutePath) {
+              return json(response, 400, { error: 'Invalid source operation' })
+            }
+
+            try {
+              const operationContext = context(body.path, absolutePath, body.source)
+              const mutation = options.framework.applySourceOperation(operationContext, body.operation)
+              const parsed = options.framework.parse({ ...operationContext, source: mutation.source })
+              const parseError = parsed.diagnostics.find((item) => item.severity === 'error')
+              if (parseError) return json(response, 422, { error: parseError.message })
+
+              const candidateId = storeCandidate(body.path, mutation.source)
+              const result: DesignerSourceCandidateResponse = {
+                ...mutation,
+                candidateId,
+                tree: parsed.tree,
+                diagnostics: parsed.diagnostics,
+              }
+              return json(response, 200, result)
+            } catch (cause) {
+              if (!(cause instanceof DesignerOperationError)) throw cause
+              return json(response, 422, {
+                error: cause instanceof Error ? cause.message : 'Unable to apply source operation',
+              })
+            }
+          }
+
+          if (request.method === 'POST' && url.pathname === '/__designer/api/ai') {
+            if (!options.ai || !options.framework.ai) return json(response, 404, { error: 'AI editing is not supported or configured' })
+            const body = await readBody(request)
+            const absolutePath = isAiRequest(body) ? await resolveDocument(body.path) : undefined
+            if (!isAiRequest(body) || !absolutePath
               || body.selection.range.start < 0 || body.selection.range.end > body.source.length
               || body.selection.range.start >= body.selection.range.end
               || body.source.slice(body.selection.range.start, body.selection.range.end) !== body.selection.source) {
               return json(response, 400, { error: 'Invalid AI edit request' })
             }
-            const proposedSource = await generateVueSource(body, config.root, cursorAiOptions ?? options.ai)
-            const parsed = parseDesignerDocument(proposedSource)
+            const rawResult = await runAiPrompt(options.framework.ai.createPrompt(body), config.root, cursorAiOptions ?? options.ai)
+            const proposedSource = options.framework.ai.extractSource(rawResult)
+            const parsed = options.framework.parse(context(body.path, absolutePath, proposedSource))
             const parseError = parsed.diagnostics.find((item) => item.severity === 'error')
-            if (parseError) return json(response, 422, { error: `Cursor returned invalid Vue source: ${parseError.message}` })
+            if (parseError) return json(response, 422, { error: options.framework.ai.invalidSourceMessage(parseError.message) })
             const result: DesignerAiResponse = { source: proposedSource }
             return json(response, 200, result)
           }
 
           if (request.method === 'POST' && url.pathname === '/__designer/api/styles') {
+            if (!options.framework.styles) return json(response, 404, { error: 'Styles are not supported by this framework' })
             const body = await readBody(request)
             if (!body || typeof body !== 'object') return json(response, 400, { error: 'Invalid style request' })
             const requestBody = body as Record<string, unknown>
+            const absolutePath = typeof requestBody.path === 'string' ? await resolveDocument(requestBody.path) : undefined
             if (typeof requestBody.path !== 'string' || typeof requestBody.source !== 'string'
-              || typeof requestBody.nodeId !== 'string' || !await resolveDocument(requestBody.path)) {
+              || typeof requestBody.nodeId !== 'string' || !absolutePath) {
               return json(response, 400, { error: 'Invalid style request' })
             }
-            return json(response, 200, getDesignerStyleRules(requestBody.source, requestBody.nodeId))
+            return json(response, 200, options.framework.styles.getRules(
+              context(requestBody.path, absolutePath, requestBody.source), requestBody.nodeId,
+            ))
           }
 
           if (request.method === 'POST' && url.pathname === '/__designer/api/style-candidate') {
+            if (!options.framework.styles) return json(response, 404, { error: 'Styles are not supported by this framework' })
             const body = await readBody(request)
-            if (!isStyleRequest(body) || !await resolveDocument(body.path)) {
+            const absolutePath = isStyleRequest(body) ? await resolveDocument(body.path) : undefined
+            if (!isStyleRequest(body) || !absolutePath) {
               return json(response, 400, { error: 'Invalid style operation' })
             }
-            const candidateSource = applyStyleOperation(body.source, body.operation)
-            const parsed = parseDesignerDocument(candidateSource)
-            const candidateId = randomUUID()
-            candidates.set(candidateId, { path: body.path, source: candidateSource })
+            const operationContext = context(body.path, absolutePath, body.source)
+            const candidateSource = options.framework.styles.applyOperation(operationContext, body.operation)
+            const parsed = options.framework.parse({ ...operationContext, source: candidateSource })
+            const parseError = parsed.diagnostics.find((item) => item.severity === 'error')
+            if (parseError) return json(response, 422, { error: parseError.message })
+            const candidateId = storeCandidate(body.path, candidateSource)
             const result: DesignerStyleCandidateResponse = {
               source: candidateSource,
               candidateId,
               tree: parsed.tree,
               diagnostics: parsed.diagnostics,
-              rules: getDesignerStyleRules(candidateSource, body.operation.nodeId),
+              rules: options.framework.styles.getRules({ ...operationContext, source: candidateSource }, body.operation.nodeId),
             }
             return json(response, 200, result)
           }
@@ -699,7 +711,7 @@ export function injectQuery(url) { return url }
 
             if (request.method === 'GET') {
               const source = await fs.readFile(absolutePath, 'utf8')
-              const parsed = parseDesignerDocument(source)
+              const parsed = options.framework.parse(context(relativePath, absolutePath, source))
               const document: DesignerDocument = {
                 path: relativePath,
                 name: path.basename(relativePath, path.extname(relativePath)),
@@ -725,6 +737,10 @@ export function injectQuery(url) { return url }
                   currentRevision,
                 })
               }
+
+              const parsed = options.framework.parse(context(relativePath, absolutePath, body.source))
+              const parseError = parsed.diagnostics.find((item) => item.severity === 'error')
+              if (parseError) return json(response, 422, { error: parseError.message })
 
               const temporaryPath = `${absolutePath}.${randomUUID()}.designer-tmp`
               await fs.writeFile(temporaryPath, body.source, 'utf8')
@@ -783,4 +799,9 @@ export function injectQuery(url) { return url }
       })
     },
   }
+}
+
+export default function designer(options: DesignerOptions): PluginOption {
+  if (!options.framework) throw new Error('A designer framework is required')
+  return [createDesignerPlugin(options), options.framework.vite]
 }

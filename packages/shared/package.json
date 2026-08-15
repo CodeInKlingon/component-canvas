@@ -7,10 +7,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./style": {
-      "types": "./dist/style.d.ts",
-      "import": "./dist/style.js"
     }
   },
   "scripts": {
@@ -18,11 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
   },
-  "dependencies": {
-    "@vue/compiler-dom": "^3.5.17",
-    "@vue/compiler-sfc": "^3.5.17",
-    "postcss": "^8.5.6"
-  },
+  "dependencies": {},
   "devDependencies": {
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"

@@ -1,0 +1,35 @@
+{
+  "name": "@vue-designer/vue",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "^5.2.4",
+    "@vue-designer/shared": "workspace:*",
+    "@vue/compiler-dom": "^3.5.17",
+    "@vue/compiler-sfc": "^3.5.17",
+    "postcss": "^8.5.6",
+    "vue-component-meta": "^3.3.9"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.3",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.4"
+  },
+  "peerDependencies": {
+    "vite": "^6.0.0 || ^7.0.0",
+    "vue": "^3.5.0"
+  }
+}

@@ -5,9 +5,9 @@
       "type": "local",
       "command": [
         "node",
-        "C:\\Users\\Daniel\\AppData\\Roaming\\Code\\User\\globalStorage\\theozhao.vscode-browser-bridge\\stdio-bridge.mjs",
+        "/Users/daniel/Library/Application Support/Code/User/globalStorage/theozhao.vscode-browser-bridge/stdio-bridge.mjs",
         "--workspace",
-        "C:\\Users\\Daniel\\source\\repos\\vue-designer"
+        "/Users/daniel/Development/vue-designer"
       ],
       "enabled": true
     }

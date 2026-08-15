@@ -41,8 +41,10 @@ import type {
   DesignerAiResponse,
   DesignerDocumentChangedEvent,
   PreviewCandidateResponse,
+  DesignerSourceCandidateResponse,
+  DesignerFrameworkClientMetadata,
 } from '@vue-designer/shared'
-import { applySourceOperationWithResult, isPreviewToEditorMessage, isVoidElement, parseDesignerDocument } from '@vue-designer/shared'
+import { isPreviewToEditorMessage } from '@vue-designer/shared'
 import TreeNode from './TreeNode.vue'
 import SourceEditor from './SourceEditor.vue'
 import { SourceHistory } from './history'
@@ -51,6 +53,7 @@ import { nativeElements, type NativeElementMetadata } from './native-elements'
 import { captureDragSelection, findDragSelectionOffset, type DragSelection } from './drag-selection'
 import { nodeClipboardMime, parseNodeClipboard, serializeNodeClipboard, type NodeClipboardPayload } from './node-clipboard'
 import { clampZoom, fitZoom, viewportPresets, zoomAroundPoint, type ViewportMode } from './canvas'
+import { isCurrentCandidateRequest, resolveCandidateSelection } from './candidate-state'
 
 type SaveState = 'clean' | 'dirty' | 'saving' | 'conflict'
 
@@ -100,6 +103,7 @@ const insertPicker = ref<{ nodeId: string; position: 'inside' | 'after' } | null
 const clipboardPayload = ref<NodeClipboardPayload | null>(null)
 const externalRevision = ref<string | null>(null)
 const aiEnabled = ref(false)
+const framework = ref<DesignerFrameworkClientMetadata | null>(null)
 const aiPromptOpen = ref(false)
 const aiPrompt = ref('')
 const aiRunning = ref(false)
@@ -196,15 +200,18 @@ async function loadDocuments(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const [loadedDocuments, loadedComponents, config] = await Promise.all([
+    const config = await api<{ previewOrigin: string; framework: DesignerFrameworkClientMetadata }>('/__designer/api/config')
+    framework.value = config.framework
+    const [loadedDocuments, loadedComponents] = await Promise.all([
       api<DesignerDocumentSummary[]>('/__designer/api/documents'),
-      api<DesignerComponentMetadata[]>('/__designer/api/components'),
-      api<{ previewOrigin: string; aiEnabled: boolean }>('/__designer/api/config'),
+      config.framework.capabilities.components
+        ? api<DesignerComponentMetadata[]>('/__designer/api/components')
+        : Promise.resolve([]),
     ])
     documents.value = loadedDocuments
     components.value = loadedComponents
     previewOrigin.value = config.previewOrigin
-    aiEnabled.value = config.aiEnabled
+    aiEnabled.value = config.framework.capabilities.ai
     if (documents.value[0]) await openDocument(documents.value[0])
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Unable to load documents'
@@ -227,7 +234,8 @@ function relativeImport(documentPath: string, componentPath: string): string {
 function insertComponent(component: DesignerComponentMetadata, target = selectedNode.value, position: 'inside' | 'after' = 'inside'): void {
   const document = activeDocument.value
   const parent = target
-  if (!document || !parent || !parent.editable || (position === 'inside' && parent.kind === 'text')) return
+  if (!framework.value?.capabilities.components || !document || !parent || !parent.editable
+    || (position === 'inside' && !parent.capabilities.canContainChildren)) return
   void applyOperation({
     type: 'insert-component',
     parentId: parent.id,
@@ -258,7 +266,7 @@ function pickComponent(component: DesignerComponentMetadata): void {
 }
 
 function canContainChildren(node: DesignerNode | null): boolean {
-  return !!node && node.kind !== 'text' && !(node.kind === 'element' && isVoidElement(node.label)) && node.editable
+  return !!node?.capabilities.canContainChildren
 }
 
 function openContextMenu(event: MouseEvent, node: DesignerNode): void {
@@ -450,22 +458,6 @@ async function createCandidate(candidateSource: string): Promise<void> {
     ? findDragSelectionOffset(candidateSource, droppedSelection.value)
     : null
   const nextSelectionOffset = insertedSelectionOffset.value ?? movedSelectionOffset
-  if (candidateSource === document.source) {
-    const parsed = parseDesignerDocument(candidateSource)
-    candidateId.value = null
-    activeDocument.value = { ...document, tree: parsed.tree, diagnostics: parsed.diagnostics }
-    replaceTree(parsed.tree)
-    selectedNodeId.value = (nextSelectionOffset === null ? null : findNodeAtOffset(parsed.tree, nextSelectionOffset)?.id)
-      ?? findNode(parsed.tree, selectedNodeId.value)?.id
-      ?? findNodeAtPath(parsed.tree, selectedPath)?.id
-      ?? null
-    droppedSelection.value = null
-    insertedSelectionOffset.value = null
-    saveState.value = 'clean'
-    error.value = ''
-    return
-  }
-
   const request = ++candidateRequest
   try {
     const result = await api<PreviewCandidateResponse>('/__designer/api/candidate', {
@@ -473,14 +465,11 @@ async function createCandidate(candidateSource: string): Promise<void> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: document.path, source: candidateSource }),
     })
-    if (request !== candidateRequest || source.value !== candidateSource) return
+    if (!isCurrentCandidateRequest(request, candidateRequest, candidateSource, source.value, document.path, activeDocument.value?.path)) return
     candidateId.value = result.candidateId
     activeDocument.value = { ...document, tree: result.tree, diagnostics: result.diagnostics }
     replaceTree(result.tree)
-    selectedNodeId.value = (nextSelectionOffset === null ? null : findNodeAtOffset(result.tree, nextSelectionOffset)?.id)
-      ?? findNode(result.tree, selectedNodeId.value)?.id
-      ?? findNodeAtPath(result.tree, selectedPath)?.id
-      ?? null
+    selectedNodeId.value = resolveCandidateSelection(result.tree, nextSelectionOffset, selectedNodeId.value, selectedPath)
     droppedSelection.value = null
     insertedSelectionOffset.value = null
     error.value = ''
@@ -493,15 +482,28 @@ async function createCandidate(candidateSource: string): Promise<void> {
 }
 
 async function applyOperation(operation: DesignerSourceOperation): Promise<void> {
+  const document = activeDocument.value
+  if (!document) return
+  const requestSource = source.value
+  const selectedPath = findNodePath(document.tree, selectedNodeId.value)
+  const request = ++candidateRequest
   try {
-    const result = applySourceOperationWithResult(source.value, operation)
-    const candidateSource = result.source
-    insertedSelectionOffset.value = result.selectionOffset ?? null
-    recordSource(candidateSource)
-    source.value = candidateSource
-    saveState.value = candidateSource === activeDocument.value?.source ? 'clean' : 'dirty'
-    await createCandidate(candidateSource)
+    const result = await api<DesignerSourceCandidateResponse>('/__designer/api/source-candidate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: document.path, source: requestSource, operation }),
+    })
+    if (!isCurrentCandidateRequest(request, candidateRequest, requestSource, source.value, document.path, activeDocument.value?.path)) return
+    recordSource(result.source)
+    source.value = result.source
+    candidateId.value = result.candidateId
+    activeDocument.value = { ...document, tree: result.tree, diagnostics: result.diagnostics }
+    replaceTree(result.tree)
+    selectedNodeId.value = resolveCandidateSelection(result.tree, result.selectionOffset, selectedNodeId.value, selectedPath)
+    saveState.value = result.source === document.source ? 'clean' : 'dirty'
+    error.value = ''
   } catch (cause) {
+    if (request !== candidateRequest) return
     error.value = cause instanceof Error ? cause.message : 'Unable to edit selection'
   }
 }
@@ -510,7 +512,7 @@ async function runAiEdit(): Promise<void> {
   const document = activeDocument.value
   const node = selectedNode.value
   const prompt = aiPrompt.value.trim()
-  if (!document || !node || !prompt || aiRunning.value) return
+  if (!framework.value?.capabilities.ai || !document || !node || !prompt || aiRunning.value) return
   const requestSource = source.value
   aiRunning.value = true
   error.value = ''
@@ -529,7 +531,9 @@ async function runAiEdit(): Promise<void> {
         },
       }),
     })
-    if (source.value !== requestSource) throw new Error('The document changed while Cursor was working. Run the prompt again.')
+    if (source.value !== requestSource || activeDocument.value?.path !== document.path) {
+      throw new Error('The document changed while Cursor was working. Run the prompt again.')
+    }
     if (result.source === requestSource) {
       aiPromptOpen.value = false
       aiPrompt.value = ''
@@ -625,12 +629,14 @@ function styleValue(property: string): string {
 
 function updateStyle(property: string, event: Event): void {
   const node = selectedNode.value
-  if (!node || node.kind === 'text') return
+  if (!framework.value?.capabilities.styles || !node || node.kind === 'text') return
   const selector = styleSelector()
   activeStyleSelector.value = selector
   const value = (event.target as HTMLInputElement | HTMLSelectElement).value
   const document = activeDocument.value
   if (!document) return
+  const requestSource = source.value
+  const request = ++candidateRequest
   previewDiagnostic.value = null
   const selectedPath = findNodePath(document.tree, selectedNodeId.value)
   void api<DesignerStyleCandidateResponse>('/__designer/api/style-candidate', {
@@ -638,10 +644,11 @@ function updateStyle(property: string, event: Event): void {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       path: document.path,
-      source: source.value,
+      source: requestSource,
       operation: { nodeId: node.id, selector, property, value: value || null },
     }),
   }).then((result) => {
+    if (!isCurrentCandidateRequest(request, candidateRequest, requestSource, source.value, document.path, activeDocument.value?.path)) return
     recordSource(result.source)
     source.value = result.source
     candidateId.value = result.candidateId
@@ -661,6 +668,7 @@ function updateStyle(property: string, event: Event): void {
       value: value || null,
     }, '*')
   }).catch((cause) => {
+    if (request !== candidateRequest) return
     error.value = cause instanceof Error ? cause.message : 'Unable to update style'
   })
 }
@@ -668,7 +676,7 @@ function updateStyle(property: string, event: Event): void {
 async function loadStyles(): Promise<void> {
   const document = activeDocument.value
   const node = selectedNode.value
-  if (!document || !node || node.kind === 'text') {
+  if (!framework.value?.capabilities.styles || !document || !node || node.kind === 'text') {
     styleRules.value = []
     return
   }
@@ -1204,7 +1212,7 @@ onUnmounted(() => {
                 @context-menu="openContextMenu"
               />
             </ul>
-            <div v-else class="empty-state">No Vue documents match the configured pattern.</div>
+            <div v-else class="empty-state">No documents match the configured pattern.</div>
             <div v-if="activeDocument?.diagnostics.length" class="tree-diagnostic">{{ activeDocument.diagnostics[0]?.message }}</div>
           </template>
           <template v-else>
@@ -1229,7 +1237,7 @@ onUnmounted(() => {
         </div>
         <div v-if="sidebarOpen" class="sidebar-switcher" aria-label="Sidebar view">
           <button :class="{ active: sidebarView === 'layers' }" @click="sidebarView = 'layers'"><Layers3 :size="15" />Layers</button>
-          <button :class="{ active: sidebarView === 'components' }" @click="sidebarView = 'components'"><Component :size="15" />Components</button>
+          <button v-if="framework?.capabilities.components" :class="{ active: sidebarView === 'components' }" @click="sidebarView = 'components'"><Component :size="15" />Components</button>
         </div>
       </aside>
 
@@ -1269,7 +1277,7 @@ onUnmounted(() => {
           >
             <div class="canvas-scene" :style="canvasSceneStyle">
               <div class="preview-frame">
-                <iframe v-if="previewUrl" ref="previewFrame" :key="previewUrl" :src="previewUrl" sandbox="allow-scripts" title="Vue document preview" @load="handlePreviewLoad" />
+                <iframe v-if="previewUrl" ref="previewFrame" :key="previewUrl" :src="previewUrl" sandbox="allow-scripts" :title="`${framework?.documentLabel ?? 'Document'} preview`" @load="handlePreviewLoad" />
                 <div v-else class="preview-empty">Select a document to begin.</div>
               </div>
             </div>
@@ -1293,14 +1301,27 @@ onUnmounted(() => {
               <PanelBottomClose v-if="sourceOpen" :size="15" /><PanelBottomOpen v-else :size="15" />
             </button>
           </header>
-          <SourceEditor v-show="sourceOpen" ref="sourceEditor" :source="source" :disabled="!activeDocument" @input="updateSource" @blur="commitSourceEdit" @cursor="syncSelectionFromSource" />
+          <SourceEditor
+            v-if="framework"
+            v-show="sourceOpen"
+            :key="`${framework.sourceLanguage}:${activeDocument?.path ?? ''}`"
+            ref="sourceEditor"
+            :source="source"
+            :file-name="activeDocument?.path.split('/').at(-1) ?? `document${framework.fileExtension}`"
+            :language="framework.sourceLanguage"
+            :document-label="framework.documentLabel"
+            :disabled="!activeDocument"
+            @input="updateSource"
+            @blur="commitSourceEdit"
+            @cursor="syncSelectionFromSource"
+          />
         </section>
       </div>
 
       <aside class="inspector-panel" :class="{ collapsed: !inspectorOpen }">
         <div class="inspector-tabs">
           <button v-if="inspectorOpen" :class="{ active: inspectorView === 'content' }" @click="inspectorView = 'content'">Props</button>
-          <button v-if="inspectorOpen" :class="{ active: inspectorView === 'style' }" @click="inspectorView = 'style'">Style</button>
+          <button v-if="inspectorOpen && framework?.capabilities.styles" :class="{ active: inspectorView === 'style' }" @click="inspectorView = 'style'">Style</button>
           <button class="panel-collapse-button" :title="inspectorOpen ? 'Collapse right panel' : 'Expand right panel'" :aria-label="inspectorOpen ? 'Collapse right panel' : 'Expand right panel'" @click="inspectorOpen = !inspectorOpen">
             <PanelRightClose v-if="inspectorOpen" :size="15" /><PanelRightOpen v-else :size="15" />
           </button>
@@ -1376,7 +1397,7 @@ onUnmounted(() => {
           </template>
         </div>
 
-        <div v-else-if="inspectorOpen && inspectorView === 'style'" class="inspector-content style-inspector">
+        <div v-else-if="inspectorOpen && inspectorView === 'style' && framework?.capabilities.styles" class="inspector-content style-inspector">
           <div v-if="!selectedNode || selectedNode.kind === 'text'" class="inspector-empty">
             <strong>Select an element</strong>
             <span>Editable local CSS rules will appear here.</span>
