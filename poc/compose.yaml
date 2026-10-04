@@ -1,0 +1,64 @@
+# kindling preview PoC — containerised microVM daemon + session manager.
+#
+# The manager shares the kindling container's network namespace
+# (`network_mode: service:kindling`) for two reasons:
+#   1. guest microVMs live on host-only IPs (172.30.0.0/16) reachable only from
+#      that namespace, and the preview proxy dials them directly for HTTP + WS;
+#   2. the kindling daemon speaks HTTP over a Unix socket, shared here through
+#      the `kindling-run` volume.
+#
+# Ports are published on the `kindling` service because the manager's listeners
+# live in that service's network namespace.
+name: kindling-preview-poc
+
+services:
+  kindling:
+    build:
+      context: ./kindling
+    privileged: true
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    volumes:
+      - kindling-root:/var/lib/kindling
+      - kindling-run:/run
+    ports:
+      - "7100:7100"          # manager control API
+      - "7200-7299:7200-7299" # per-project preview origins
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /run/kindling-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 180
+      start_period: 20s
+    stop_grace_period: 30s
+
+  manager:
+    build:
+      context: ./manager
+    depends_on:
+      kindling:
+        condition: service_healthy
+    network_mode: "service:kindling"
+    volumes:
+      - kindling-run:/run
+      - manager-data:/data
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "7100"
+      KLING_SOCK: /run/kling.sock
+      KLING_IMAGE: toolchain
+      GUEST_PORT: "3000"
+      PREVIEW_HOST: "127.0.0.1"
+      PREVIEW_BIND_HOST: "0.0.0.0"
+      PREVIEW_PORT_BASE: "7200"
+      PREVIEW_PORT_MAX: "7299"
+      DATA_DIR: /data
+      EGRESS: allowlist
+      ALLOW_DOMAINS: "registry.npmjs.org,registry.npmmirror.com"
+    restart: unless-stopped
+
+volumes:
+  kindling-root:
+  kindling-run:
+  manager-data:
