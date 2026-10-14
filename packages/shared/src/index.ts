@@ -95,6 +95,8 @@ export interface DesignerAiRequest {
   path: string
   source: string
   prompt: string
+  model?: string
+  params?: DesignerAiModelParameterValue[]
   selection: {
     nodeId: string
     range: DesignerSourceRange
@@ -104,6 +106,30 @@ export interface DesignerAiRequest {
 
 export interface DesignerAiResponse {
   source: string
+}
+
+export interface DesignerAiModelParameterValue {
+  id: string
+  value: string
+}
+
+export interface DesignerAiModelParameter {
+  id: string
+  displayName?: string
+  values: Array<{ value: string; displayName?: string }>
+}
+
+export interface DesignerAiModel {
+  id: string
+  displayName: string
+  description?: string
+  parameters: DesignerAiModelParameter[]
+  defaultParams: DesignerAiModelParameterValue[]
+}
+
+export interface DesignerAiModelsResponse {
+  models: DesignerAiModel[]
+  defaultModel: string
 }
 
 export interface DesignerComponentMetadata {

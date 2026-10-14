@@ -1,8 +1,46 @@
-import { Agent } from '@cursor/sdk'
+import { Agent, Cursor } from '@cursor/sdk'
+import type { DesignerAiModel, DesignerAiModelParameterValue } from '@vue-designer/shared'
 
 export interface CursorAiOptions {
   apiKey?: string
   model?: string
+  params?: DesignerAiModelParameterValue[]
+}
+
+export const defaultAiModel = 'composer-2.5'
+
+function requireApiKey(options: CursorAiOptions): string {
+  const apiKey = options.apiKey ?? process.env.CURSOR_API_KEY
+  if (!apiKey) throw new Error('CURSOR_API_KEY is required to use AI editing')
+  return apiKey
+}
+
+export async function listAiModels(options: CursorAiOptions): Promise<DesignerAiModel[]> {
+  const models = await Cursor.models.list({ apiKey: requireApiKey(options) })
+  return models.map(({ id, displayName, description, parameters = [], variants = [] }) => ({
+    id,
+    displayName,
+    description,
+    parameters: parameters.map((parameter) => ({
+      id: parameter.id,
+      displayName: parameter.displayName,
+      values: parameter.values.map(({ value, displayName }) => ({ value, displayName })),
+    })),
+    defaultParams: (variants.find((variant) => variant.isDefault)?.params ?? [])
+      .filter((param) => parameters.some((parameter) => parameter.id === param.id))
+      .map(({ id, value }) => ({ id, value })),
+  }))
+}
+
+export function invalidAiModelParams(model: DesignerAiModel, params: DesignerAiModelParameterValue[]): string | undefined {
+  const seen = new Set<string>()
+  for (const param of params) {
+    const parameter = model.parameters.find((item) => item.id === param.id)
+    if (!parameter) return `${model.displayName} does not support the "${param.id}" setting`
+    if (seen.has(param.id)) return `The "${param.id}" setting was provided more than once`
+    if (!parameter.values.some((item) => item.value === param.value)) return `"${param.value}" is not a valid ${parameter.displayName ?? param.id} for ${model.displayName}`
+    seen.add(param.id)
+  }
 }
 
 export async function runAiPrompt(
@@ -10,12 +48,9 @@ export async function runAiPrompt(
   root: string,
   options: CursorAiOptions,
 ): Promise<string> {
-  const apiKey = options.apiKey ?? process.env.CURSOR_API_KEY
-  if (!apiKey) throw new Error('CURSOR_API_KEY is required to use AI editing')
-
   const result = await Agent.prompt(prompt, {
-    apiKey,
-    model: { id: options.model ?? 'composer-2.5' },
+    apiKey: requireApiKey(options),
+    model: { id: options.model ?? defaultAiModel, params: options.params?.length ? options.params : undefined },
     tools: ['read', 'glob', 'grep'],
     local: { cwd: root },
   })

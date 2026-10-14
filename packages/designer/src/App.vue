@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   Braces,
   ChevronDown,
@@ -38,6 +38,9 @@ import type {
   DesignerPropMetadata,
   DesignerStyleRule,
   DesignerStyleCandidateResponse,
+  DesignerAiModel,
+  DesignerAiModelsResponse,
+  DesignerAiModelParameterValue,
   DesignerAiResponse,
   DesignerDocumentChangedEvent,
   PreviewCandidateResponse,
@@ -54,6 +57,7 @@ import { captureDragSelection, findDragSelectionOffset, type DragSelection } fro
 import { nodeClipboardMime, parseNodeClipboard, serializeNodeClipboard, type NodeClipboardPayload } from './node-clipboard'
 import { clampZoom, fitZoom, viewportPresets, zoomAroundPoint, type ViewportMode } from './canvas'
 import { isCurrentCandidateRequest, resolveCandidateSelection } from './candidate-state'
+import { readAiModelPreference, resolveAiModelId, resolveAiModelParams, writeAiModelPreference } from './ai-model-preference'
 
 type SaveState = 'clean' | 'dirty' | 'saving' | 'conflict'
 
@@ -107,6 +111,12 @@ const framework = ref<DesignerFrameworkClientMetadata | null>(null)
 const aiPromptOpen = ref(false)
 const aiPrompt = ref('')
 const aiRunning = ref(false)
+const aiModels = ref<DesignerAiModel[]>([])
+const aiModel = ref('')
+const aiModelsState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
+const aiModelsError = ref('')
+const aiParams = ref<Record<string, string>>({})
+const selectedAiModel = computed(() => aiModels.value.find((model) => model.id === aiModel.value))
 const historyVersion = ref(0)
 const history = new SourceHistory()
 let sourcePreviewTimer: number | undefined
@@ -508,6 +518,54 @@ async function applyOperation(operation: DesignerSourceOperation): Promise<void>
   }
 }
 
+async function loadAiModels(): Promise<void> {
+  if (aiModelsState.value === 'loading' || aiModelsState.value === 'ready') return
+  aiModelsState.value = 'loading'
+  aiModelsError.value = ''
+  try {
+    const result = await api<DesignerAiModelsResponse>('/__designer/api/ai/models')
+    aiModels.value = result.models
+    aiModel.value = resolveAiModelId(result.models, result.defaultModel, aiModel.value, readAiModelPreference()?.model)
+    aiModelsState.value = 'ready'
+  } catch (cause) {
+    aiModelsError.value = cause instanceof Error ? cause.message : 'Unable to load Cursor models'
+    aiModelsState.value = 'error'
+  }
+}
+
+watch(selectedAiModel, (model) => {
+  aiParams.value = resolveAiModelParams(model, readAiModelPreference())
+})
+
+watch([aiModel, aiParams], () => {
+  if (aiModelsState.value !== 'ready' || !selectedAiModel.value) return
+  writeAiModelPreference({
+    model: aiModel.value,
+    params: Object.entries(aiParams.value).map(([id, value]) => ({ id, value })),
+  })
+}, { deep: true })
+
+function selectedAiParams(): DesignerAiModelParameterValue[] {
+  return Object.entries(aiParams.value)
+    .filter(([, value]) => value !== '')
+    .map(([id, value]) => ({ id, value }))
+}
+
+function closeAiPrompt(): void {
+  if (!aiRunning.value) aiPromptOpen.value = false
+}
+
+function submitAiPromptShortcut(event: KeyboardEvent): void {
+  if (!event.ctrlKey && !event.metaKey) return
+  event.preventDefault()
+  void runAiEdit()
+}
+
+function openAiPrompt(): void {
+  aiPromptOpen.value = true
+  void loadAiModels()
+}
+
 async function runAiEdit(): Promise<void> {
   const document = activeDocument.value
   const node = selectedNode.value
@@ -524,6 +582,8 @@ async function runAiEdit(): Promise<void> {
         path: document.path,
         source: requestSource,
         prompt,
+        model: aiModel.value || undefined,
+        params: aiModel.value ? selectedAiParams() : undefined,
         selection: {
           nodeId: node.id,
           range: node.range,
@@ -902,7 +962,7 @@ function handlePreviewMessage(event: MessageEvent): void {
       return
     }
     selectNode(node, event.data.type !== 'ai-prompt')
-    if (event.data.type === 'ai-prompt' && aiEnabled.value) aiPromptOpen.value = true
+    if (event.data.type === 'ai-prompt' && aiEnabled.value) openAiPrompt()
   }
 }
 
@@ -1070,6 +1130,10 @@ function handleShortcut(event: KeyboardEvent): void {
   if (event.code === 'Space' && !isEditing) {
     spacePressed.value = true
     event.preventDefault()
+  }
+  if (event.key === 'Escape' && aiPromptOpen.value) {
+    closeAiPrompt()
+    return
   }
   if (event.key === 'Escape') {
     escapeDeselecting = true
@@ -1284,14 +1348,6 @@ onUnmounted(() => {
             <div v-if="spacePressed && viewportMode !== 'responsive'" class="canvas-pan-capture" />
             <div v-if="canvasOwnsInput && viewportMode !== 'responsive'" class="canvas-input-capture" @click="selectCanvasPoint" />
           </div>
-          <form v-if="aiPromptOpen && selectedNode" class="ai-prompt" @submit.prevent="runAiEdit">
-            <div class="ai-prompt-heading"><Sparkles :size="15" /><strong>Edit {{ selectedNode.label }} with AI</strong></div>
-            <textarea v-model="aiPrompt" autofocus :disabled="aiRunning" placeholder="Describe the change, then move on..." @keydown.esc="aiPromptOpen = false" />
-            <div class="ai-prompt-actions">
-              <button type="button" :disabled="aiRunning" @click="aiPromptOpen = false">Cancel</button>
-              <button type="submit" :disabled="!aiPrompt.trim() || aiRunning"><Sparkles :size="13" />{{ aiRunning ? 'Working...' : 'Apply' }}</button>
-            </div>
-          </form>
         </section>
         <section class="source-panel">
           <header class="source-panel-header">
@@ -1478,6 +1534,53 @@ onUnmounted(() => {
             <hr />
             <button class="danger" role="menuitem" @click="removeContextNode">Delete</button>
           </div>
+    <div v-if="aiPromptOpen && selectedNode" class="ai-prompt-backdrop" @pointerdown.self="closeAiPrompt">
+      <form class="ai-prompt" role="dialog" aria-modal="true" aria-labelledby="ai-prompt-title" @submit.prevent="runAiEdit">
+        <header>
+          <div>
+            <strong id="ai-prompt-title"><Sparkles :size="15" />Edit {{ selectedNode.label }} with AI</strong>
+            <small>Cursor proposes a source change you can preview, undo, or save</small>
+          </div>
+          <button type="button" aria-label="Close AI prompt" :disabled="aiRunning" @click="closeAiPrompt">×</button>
+        </header>
+        <div class="ai-prompt-body">
+          <textarea
+            v-model="aiPrompt"
+            autofocus
+            :disabled="aiRunning"
+            placeholder="Describe the change..."
+            @keydown.enter="submitAiPromptShortcut"
+          />
+        </div>
+        <footer>
+          <div class="ai-prompt-settings">
+            <label>
+              <span>Model</span>
+              <select
+                v-model="aiModel"
+                :title="aiModelsState === 'error' ? aiModelsError : selectedAiModel?.description ?? 'Cursor model'"
+                :disabled="aiRunning || aiModelsState !== 'ready'"
+              >
+                <option v-if="aiModelsState === 'loading'" :value="aiModel">Loading models...</option>
+                <option v-else-if="aiModelsState === 'error'" :value="aiModel">Models unavailable</option>
+                <option v-for="model in aiModels" :key="model.id" :value="model.id">{{ model.displayName }}</option>
+              </select>
+            </label>
+            <label v-for="parameter in selectedAiModel?.parameters ?? []" :key="parameter.id">
+              <span>{{ parameter.displayName ?? parameter.id }}</span>
+              <select v-model="aiParams[parameter.id]" :disabled="aiRunning">
+                <option value="">Default</option>
+                <option v-for="option in parameter.values" :key="option.value" :value="option.value">{{ option.displayName ?? option.value }}</option>
+              </select>
+            </label>
+          </div>
+          <div class="ai-prompt-actions">
+            <button type="button" :disabled="aiRunning" @click="closeAiPrompt">Cancel</button>
+            <button type="submit" :disabled="!aiPrompt.trim() || aiRunning"><Sparkles :size="13" />{{ aiRunning ? 'Working...' : 'Apply' }}</button>
+          </div>
+        </footer>
+      </form>
+    </div>
     <div v-if="insertPicker" class="insert-picker-backdrop" @pointerdown.self="closeInsertPicker">
       <section class="insert-picker" role="dialog" aria-modal="true" aria-labelledby="insert-picker-title">
         <header>

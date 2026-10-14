@@ -13,6 +13,8 @@ import type {
   DesignerStyleOperation,
   DesignerDocumentChangedEvent,
   DesignerAiRequest,
+  DesignerAiModel,
+  DesignerAiModelsResponse,
   DesignerAiResponse,
   DesignerSourceCandidateResponse,
   DesignerSourceOperation,
@@ -25,7 +27,7 @@ import type {
 } from '@vue-designer/shared'
 import { DesignerOperationError, isDesignerSourceOperation } from '@vue-designer/shared'
 import { CapabilityStore } from './capabilities.js'
-import { runAiPrompt, type CursorAiOptions } from './ai.js'
+import { defaultAiModel, invalidAiModelParams, listAiModels, runAiPrompt, type CursorAiOptions } from './ai.js'
 
 export interface DesignerDocumentContext {
   path: string
@@ -135,6 +137,10 @@ function isAiRequest(value: unknown): value is DesignerAiRequest {
   const candidate = value as Record<string, unknown>
   if (typeof candidate.path !== 'string' || typeof candidate.source !== 'string'
     || typeof candidate.prompt !== 'string' || !candidate.prompt.trim()
+    || (candidate.model !== undefined && typeof candidate.model !== 'string')
+    || (candidate.params !== undefined && (!Array.isArray(candidate.params) || !candidate.params.every((param) => !!param
+      && typeof param === 'object' && typeof (param as Record<string, unknown>).id === 'string'
+      && typeof (param as Record<string, unknown>).value === 'string')))
     || !candidate.selection || typeof candidate.selection !== 'object') return false
   const selection = candidate.selection as Record<string, unknown>
   const range = selection.range as Record<string, unknown> | undefined
@@ -150,6 +156,15 @@ function createDesignerPlugin(options: DesignerOptions): Plugin {
   const capabilities = new CapabilityStore()
   let previewOrigin = ''
   let cursorAiOptions: CursorAiOptions | undefined
+  let aiModels: Promise<DesignerAiModel[]> | undefined
+
+  function loadAiModels(aiOptions: CursorAiOptions): Promise<DesignerAiModel[]> {
+    aiModels ??= listAiModels(aiOptions).catch((cause: unknown) => {
+      aiModels = undefined
+      throw cause
+    })
+    return aiModels
+  }
 
   async function discoverDocuments(): Promise<DesignerDocumentSummary[]> {
     const patterns = Array.isArray(options.documents)
@@ -647,6 +662,22 @@ export function injectQuery(url) { return url }
             }
           }
 
+          if (request.method === 'GET' && url.pathname === '/__designer/api/ai/models') {
+            if (!options.ai || !options.framework.ai) return json(response, 404, { error: 'AI editing is not supported or configured' })
+            const aiOptions = cursorAiOptions ?? options.ai
+            try {
+              const models = await loadAiModels(aiOptions)
+              const configured = aiOptions.model ?? defaultAiModel
+              const result: DesignerAiModelsResponse = {
+                models,
+                defaultModel: models.some((model) => model.id === configured) ? configured : models[0]?.id ?? configured,
+              }
+              return json(response, 200, result)
+            } catch (cause) {
+              return json(response, 502, { error: cause instanceof Error ? cause.message : 'Unable to load Cursor models' })
+            }
+          }
+
           if (request.method === 'POST' && url.pathname === '/__designer/api/ai') {
             if (!options.ai || !options.framework.ai) return json(response, 404, { error: 'AI editing is not supported or configured' })
             const body = await readBody(request)
@@ -657,7 +688,20 @@ export function injectQuery(url) { return url }
               || body.source.slice(body.selection.range.start, body.selection.range.end) !== body.selection.source) {
               return json(response, 400, { error: 'Invalid AI edit request' })
             }
-            const rawResult = await runAiPrompt(options.framework.ai.createPrompt(body), config.root, cursorAiOptions ?? options.ai)
+            const aiOptions = cursorAiOptions ?? options.ai
+            const modelId = body.model || aiOptions.model || defaultAiModel
+            const params = body.params ?? []
+            if (body.model || params.length) {
+              const model = (await loadAiModels(aiOptions)).find((item) => item.id === modelId)
+              if (!model) return json(response, 400, { error: `Unknown Cursor model: ${modelId}` })
+              const paramsError = invalidAiModelParams(model, params)
+              if (paramsError) return json(response, 400, { error: paramsError })
+            }
+            const rawResult = await runAiPrompt(
+              options.framework.ai.createPrompt(body),
+              config.root,
+              { ...aiOptions, model: modelId, params },
+            )
             const proposedSource = options.framework.ai.extractSource(rawResult)
             const parsed = options.framework.parse(context(body.path, absolutePath, proposedSource))
             const parseError = parsed.diagnostics.find((item) => item.severity === 'error')
