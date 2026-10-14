@@ -1,6 +1,8 @@
 export interface DesignerDocumentSummary {
   path: string
   name: string
+  /** Last modification time in milliseconds since the epoch. */
+  modified?: number
 }
 
 export interface DesignerDocument extends DesignerDocumentSummary {
@@ -8,6 +10,29 @@ export interface DesignerDocument extends DesignerDocumentSummary {
   revision: string
   tree: DesignerNode[]
   diagnostics: DesignerDiagnostic[]
+}
+
+/** A document snapshot emitted by a read-only build, with style rules precomputed per node. */
+export interface DesignerStaticDocument extends DesignerDocument {
+  styleRules: Record<string, DesignerStyleRule[]>
+}
+
+export type DesignerMode = 'edit' | 'readonly'
+
+export interface DesignerRuntimeConfig {
+  mode: DesignerMode
+  /** Origin serving previews; empty when previews share the editor origin. */
+  previewOrigin: string
+  framework: DesignerFrameworkClientMetadata
+  /** Root-relative directories that new documents may be created in. */
+  documentRoots: string[]
+  /** The configured document patterns, for display. */
+  documentPatterns: string[]
+}
+
+export interface CreateDocumentRequest {
+  directory: string
+  name: string
 }
 
 export interface DesignerFrameworkClientMetadata {

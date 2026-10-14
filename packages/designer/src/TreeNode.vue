@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, inject, ref } from 'vue'
 import { ChevronRight, CodeXml, Component, ComponentIcon, Type } from '@lucide/vue'
 import type { DesignerNode } from '@vue-designer/shared'
+import { readOnlyKey } from './host'
 
 const props = defineProps<{
   node: DesignerNode
@@ -21,6 +22,7 @@ const emit = defineEmits<{
   contextMenu: [event: MouseEvent, node: DesignerNode]
 }>()
 
+const readOnly = inject(readOnlyKey, false)
 const collapsed = computed(() => props.collapsedIds.has(props.node.id))
 
 type DropIntent = 'before' | 'inside' | 'append' | 'after'
@@ -28,7 +30,7 @@ type DropIntent = 'before' | 'inside' | 'append' | 'after'
 const dropIntent = ref<DropIntent | null>(null)
 
 function canDrop(intent: DropIntent): boolean {
-  if (!props.node.editable || !props.dragKind) return false
+  if (readOnly || !props.node.editable || !props.dragKind) return false
   if (props.dragKind === 'node' && props.draggedNode) {
     const isSelf = props.node.id === props.draggedNode.id
     const isDescendant = props.node.range.start >= props.draggedNode.range.start
@@ -65,7 +67,7 @@ function handleDrop(event: DragEvent, intent: DropIntent): void {
 }
 
 function handleDragStart(event: DragEvent): void {
-  if (!props.node.editable) return
+  if (readOnly || !props.node.editable) return
   event.stopPropagation()
   event.dataTransfer?.setData('application/x-vue-designer-node', props.node.id)
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
@@ -107,7 +109,7 @@ function handleChildContextMenu(event: MouseEvent, node: DesignerNode): void {
         class="tree-row"
         :class="{ selected: selectedId === node.id, locked: !node.editable, 'drop-target': dropIntent === 'inside' || dropIntent === 'append' }"
         :title="node.lockedReason"
-        :draggable="node.editable"
+        :draggable="!readOnly && node.editable"
         @click="emit('select', node)"
         @contextmenu.prevent.stop="emit('contextMenu', $event, node)"
         @dragstart="handleDragStart"

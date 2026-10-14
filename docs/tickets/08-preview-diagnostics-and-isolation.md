@@ -30,3 +30,7 @@ Component failures produce actionable diagnostics without crashing the editor or
 
 - Protocol and token lifecycle tests.
 - Adversarial browser tests for API access, navigation, storage, malformed messages, and preview crashes.
+
+## Notes
+
+- Read-only static builds (ticket 19) cannot use a separate preview origin. Their previews run with `allow-scripts allow-same-origin` because the build exposes no filesystem APIs or capabilities. The dev server isolation described here is unchanged.

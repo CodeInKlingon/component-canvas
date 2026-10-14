@@ -24,6 +24,8 @@ These tickets are ordered by dependency. Each slice must leave the designer in a
 | [15](15-props-inspector-complex-values.md) | Props inspector complex values | Array, object, and expression props render with appropriate controls |
 | [16](16-framework-support-extraction.md) | Framework support extraction | Vue document support becomes an imported framework option, leaving reusable designer and Vite infrastructure ready for future adapters |
 | [17](17-component-sources.md) | Component sources (complete) | Palette components are discovered from inline local globs and component libraries with per-library casing and import modes |
+| [18](18-designer-takeover-and-landing.md) | Designer takeover and landing screen (complete) | The dev server opens the designer, which lists, groups, and creates design files |
+| [19](19-read-only-static-build.md) | Read-only static build (complete) | Production builds publish a browsable, read-only designer |
 
 ## Working Agreement
 

@@ -19,11 +19,14 @@ describe('framework package boundary', () => {
   })
 
   it('keeps shared and designer free of edited-document Vue runtime code', async () => {
-    const [sharedManifest, sharedSource, designerSource] = await Promise.all([
+    const [sharedManifest, sharedSource, ...designerSources] = await Promise.all([
       text('../../shared/package.json'),
       text('../../shared/src/index.ts'),
       text('../../designer/src/App.vue'),
+      text('../../designer/src/EditorScreen.vue'),
+      text('../../designer/src/host.ts'),
     ])
+    const designerSource = designerSources.join('\n')
     expect(sharedManifest).not.toContain('@vue/compiler')
     expect(sharedManifest).not.toContain('postcss')
     expect(sharedSource).not.toContain("from './parse")

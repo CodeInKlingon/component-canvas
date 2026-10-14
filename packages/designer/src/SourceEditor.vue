@@ -32,6 +32,23 @@ const cursorPosition = computed(() => {
   return { line: lines.length, column: (lines.at(-1)?.length ?? 0) + 1 }
 })
 
+// The editor has no read-only mode, so a disabled editor intercepts edits before they reach it.
+const navigationKeys = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', 'Escape', 'Shift', 'Control', 'Alt', 'Meta'])
+
+function blockEdit(event: Event): void {
+  if (!props.disabled) return
+  event.preventDefault()
+  event.stopImmediatePropagation()
+}
+
+function blockEditKey(event: KeyboardEvent): void {
+  if (!props.disabled || navigationKeys.has(event.key)) return
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && ['a', 'c'].includes(event.key.toLowerCase())) return
+  blockEdit(event)
+}
+
+const editEvents = ['beforeinput', 'paste', 'cut', 'drop'] as const
+
 function syncCursor(): void {
   const selection = editor?.getState().selections?.at(-1)
   if (!selection) return
@@ -50,6 +67,13 @@ onMounted(async () => {
 
   editor = new DiffsEditor({
     onChange(next) {
+      if (props.disabled) {
+        // Restore any edit that bypassed the input guards.
+        if (next.contents !== props.source) {
+          editor?.applyEdits([{ range: { start: { line: 0, character: 0 }, end: positionAt(next.contents, next.contents.length) }, newText: props.source }])
+        }
+        return
+      }
       emit('input', next.contents)
       queueMicrotask(syncCursor)
     },
@@ -68,6 +92,8 @@ onMounted(async () => {
   detach = editor.edit(file)
   host.addEventListener('keyup', syncCursor)
   host.addEventListener('pointerup', syncCursor)
+  host.addEventListener('keydown', blockEditKey, true)
+  for (const name of editEvents) host.addEventListener(name, blockEdit, true)
   loading.value = false
 })
 
@@ -87,6 +113,8 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(sourceSyncFrame ?? 0)
   mount.value?.removeEventListener('keyup', syncCursor)
   mount.value?.removeEventListener('pointerup', syncCursor)
+  mount.value?.removeEventListener('keydown', blockEditKey, true)
+  for (const name of editEvents) mount.value?.removeEventListener(name, blockEdit, true)
   detach?.()
   file?.cleanUp()
 })

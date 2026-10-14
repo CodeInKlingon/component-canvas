@@ -4,9 +4,15 @@ import { createServer, request as httpRequest, type IncomingMessage, type Server
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fg from 'fast-glob'
-import { loadEnv, type Plugin, type PluginOption, type ResolvedConfig, type UserConfig, type ViteDevServer } from 'vite'
+import picomatch from 'picomatch'
+import { loadEnv, mergeConfig, normalizePath, type Plugin, type PluginOption, type ResolvedConfig, type UserConfig, type ViteDevServer } from 'vite'
 import type {
+  CreateDocumentRequest,
   DesignerDocument,
+  DesignerMode,
+  DesignerNode,
+  DesignerRuntimeConfig,
+  DesignerStaticDocument,
   DesignerDocumentSummary,
   DesignerComponentMetadata,
   DesignerStyleCandidateResponse,
@@ -37,7 +43,8 @@ export interface DesignerDocumentContext {
 
 export interface DesignerComponentsContext<TOptions = unknown> {
   config: ResolvedConfig
-  server: ViteDevServer
+  /** Absent while emitting a read-only build. */
+  server?: ViteDevServer
   options: TOptions
 }
 
@@ -72,6 +79,8 @@ export interface DesignerFramework<TComponentOptions = any> {
     extractSource(result: string): string
     invalidSourceMessage(message: string): string
   }
+  /** Returns starter source for a new document. Required to create documents from the designer. */
+  createDocument?(context: { name: string; path: string }): string
 }
 
 export type DesignerComponentOptionsOf<TFramework> = TFramework extends DesignerFramework<infer TOptions> ? TOptions : never
@@ -161,113 +170,80 @@ function isAiRequest(value: unknown): value is DesignerAiRequest {
     && !!range && Number.isInteger(range.start) && Number.isInteger(range.end)
 }
 
-function createDesignerPlugin(options: DesignerOptions): Plugin {
-  let config: ResolvedConfig
-  let documentFiles = new Map<string, string>()
-  const previewEntryPrefix = '\0vue-designer:preview-entry?'
-  const candidates = new Map<string, { path: string; source: string }>()
-  const capabilities = new CapabilityStore()
-  let previewOrigin = ''
-  let cursorAiOptions: CursorAiOptions | undefined
-  let aiModels: Promise<DesignerAiModel[]> | undefined
+function isCreateDocumentRequest(value: unknown): value is CreateDocumentRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return typeof candidate.directory === 'string' && typeof candidate.name === 'string'
+}
 
-  function loadAiModels(aiOptions: CursorAiOptions): Promise<DesignerAiModel[]> {
-    aiModels ??= listAiModels(aiOptions).catch((cause: unknown) => {
-      aiModels = undefined
-      throw cause
-    })
-    return aiModels
+export function documentPatterns(documents: string | string[]): string[] {
+  return Array.isArray(documents) ? documents : [documents]
+}
+
+/** Static base directories of the document patterns, relative to the project root. */
+export function documentRoots(patterns: string[]): string[] {
+  const roots = fg.generateTasks(patterns).map((task) => task.base === '.' ? '' : task.base.replaceAll('\\', '/'))
+  return [...new Set(roots)].sort()
+}
+
+export function createDocumentMatcher(patterns: string[]): (relativePath: string) => boolean {
+  const include = patterns.filter((pattern) => !pattern.startsWith('!'))
+  const exclude = patterns.filter((pattern) => pattern.startsWith('!')).map((pattern) => pattern.slice(1))
+  if (!include.length) return () => false
+  const included = picomatch(include)
+  const excluded = exclude.length ? picomatch(exclude) : () => false
+  return (relativePath) => included(relativePath) && !excluded(relativePath)
+}
+
+const documentNamePattern = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
+
+/** Resolves a requested new document to a root-confined path matching the document patterns. */
+export function resolveNewDocumentPath(
+  root: string,
+  patterns: string[],
+  request: CreateDocumentRequest,
+  extension: string,
+): { path: string; absolutePath: string } | { error: string } {
+  const name = request.name.trim()
+  if (!documentNamePattern.test(name)) {
+    return { error: 'Names may contain letters, numbers, hyphens, and underscores, and must start with a letter or number' }
   }
-
-  async function discoverDocuments(): Promise<DesignerDocumentSummary[]> {
-    const patterns = Array.isArray(options.documents)
-      ? options.documents
-      : [options.documents]
-    const files = await fg(patterns, {
-      absolute: true,
-      cwd: config.root,
-      onlyFiles: true,
-      unique: true,
-    })
-
-    documentFiles = new Map(
-      files.map((absolutePath) => {
-        const relativePath = path.relative(config.root, absolutePath).replaceAll('\\', '/')
-        return [relativePath, path.resolve(absolutePath)]
-      }),
-    )
-
-    return [...documentFiles.keys()].sort().map((relativePath) => ({
-      path: relativePath,
-      name: path.basename(relativePath, path.extname(relativePath)),
-    }))
+  const requestedDirectory = request.directory.trim().replaceAll('\\', '/')
+  const directory = requestedDirectory ? path.posix.normalize(requestedDirectory).replace(/\/+$/, '') : ''
+  if (path.isAbsolute(requestedDirectory) || /^[a-z]:/i.test(requestedDirectory)
+    || directory === '..' || directory.startsWith('../')) {
+    return { error: 'The folder must be inside the project' }
   }
-
-  async function resolveDocument(relativePath: string): Promise<string | undefined> {
-    await discoverDocuments()
-    return documentFiles.get(relativePath)
+  const relativePath = directory && directory !== '.' ? `${directory}/${name}${extension}` : `${name}${extension}`
+  const absolutePath = path.resolve(root, relativePath)
+  const confined = path.relative(root, absolutePath)
+  if (!confined || confined.startsWith('..') || path.isAbsolute(confined)) {
+    return { error: 'The folder must be inside the project' }
   }
-
-  function context(path: string, absolutePath: string, source: string): DesignerDocumentContext {
-    return { path, absolutePath, source }
+  if (!createDocumentMatcher(patterns)(relativePath)) {
+    return { error: `${relativePath} does not match the configured document patterns` }
   }
+  return { path: relativePath, absolutePath }
+}
 
-  function storeCandidate(path: string, source: string): string {
-    const candidateId = randomUUID()
-    candidates.set(candidateId, { path, source })
-    if (candidates.size > 50) candidates.delete(candidates.keys().next().value!)
-    return candidateId
+function designerShell(mode: DesignerMode, scriptSource: string): string {
+  return `<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="vue-designer-mode" content="${mode}"><title>Vue Designer</title></head>
+<body><div id="app"></div><script type="module" src="${scriptSource}"></script></body></html>`
+}
+
+function collectNodeIds(nodes: DesignerNode[], ids: string[] = []): string[] {
+  for (const node of nodes) {
+    if (node.kind !== 'text') ids.push(node.id)
+    collectNodeIds(node.children, ids)
   }
+  return ids
+}
 
-  return {
-    name: 'vue-designer',
-    enforce: 'pre',
-    config() {
-      return options.framework.config
-    },
-    async resolveId(id) {
-      if (options.framework.preview.resolveCandidateId(id)) return id
-      if (id.startsWith('/__designer/preview-entry.js?')) {
-        return `${previewEntryPrefix}${id.slice(id.indexOf('?') + 1)}`
-      }
-      if (id.startsWith('/__designer/candidate?')) {
-        const candidateId = new URLSearchParams(id.slice(id.indexOf('?') + 1)).get('id') ?? ''
-        const candidate = candidates.get(candidateId)
-        if (!candidate) throw new Error('Preview candidate expired')
-        const absolutePath = await resolveDocument(candidate.path)
-        if (!absolutePath) throw new Error('Preview document not found')
-        return options.framework.preview.createCandidateId(absolutePath, candidateId)
-      }
-    },
-    async load(id) {
-      const candidateReference = options.framework.preview.resolveCandidateId(id)
-      if (candidateReference?.root) {
-        const candidate = candidates.get(candidateReference.candidateId)
-        if (!candidate) throw new Error('Preview candidate expired')
-        return candidate.source
-      }
-      if (!id.startsWith(previewEntryPrefix)) return
-
-      const params = new URLSearchParams(id.slice(previewEntryPrefix.length))
-      const relativePath = params.get('path') ?? ''
-      const previewSession = params.get('session') ?? ''
-      if (!previewSession) throw new Error('Preview session is required')
-      const absolutePath = await resolveDocument(relativePath)
-      if (!absolutePath) throw new Error('Preview document not found')
-      const candidateId = params.get('candidate')
-      const candidate = candidateId ? candidates.get(candidateId) : undefined
-      if (candidate && candidate.path !== relativePath) throw new Error('Preview candidate does not match document')
-
-      const appPath = options.app ? path.resolve(config.root, options.app) : null
-      const documentImport = candidateId && candidate
-        ? `/__designer/candidate?id=${encodeURIComponent(candidateId)}`
-        : options.framework.preview.createDocumentId(absolutePath)
-      const frameworkEntry = options.framework.preview.createEntry({
-        documentImport,
-        appImport: appPath ?? undefined,
-      })
-      return `
-const session = ${JSON.stringify(previewSession)}
+/** The preview-side bridge: selection overlay, diagnostics, and the editor message protocol. */
+function previewModule(sessionExpression: string, frameworkEntry: string, aiEnabled: boolean): string {
+  return `
+const session = ${sessionExpression}
 const send = (message) => parent.postMessage({ channel: 'vue-designer', session, ...message }, '*')
 const describe = (value) => value instanceof Error
   ? { message: value.message, stack: value.stack }
@@ -367,7 +343,7 @@ function updateSelectionOverlay() {
   selectionOverlay.style.top = (rect.top - 2) + 'px'
   selectionOverlay.style.width = rect.width + 'px'
   selectionOverlay.style.height = rect.height + 'px'
-  aiButton.style.display = ${JSON.stringify(!!options.ai && !!options.framework.ai)} ? 'grid' : 'none'
+  aiButton.style.display = ${JSON.stringify(aiEnabled)} ? 'grid' : 'none'
   aiButton.style.left = Math.max(4, rect.right - 24) + 'px'
   aiButton.style.top = Math.max(4, rect.top - 34) + 'px'
 }
@@ -460,6 +436,254 @@ addEventListener('message', (event) => {
   }
 })
 `
+}
+
+function createDesignerPlugin(options: DesignerOptions): Plugin {
+  let config: ResolvedConfig
+  let documentFiles = new Map<string, string>()
+  const previewEntryPrefix = '\0vue-designer:preview-entry?'
+  const candidates = new Map<string, { path: string; source: string }>()
+  const capabilities = new CapabilityStore()
+  let previewOrigin = ''
+  let cursorAiOptions: CursorAiOptions | undefined
+  let aiModels: Promise<DesignerAiModel[]> | undefined
+  const patterns = documentPatterns(options.documents)
+  const roots = documentRoots(patterns)
+  // A production build replaces the host app with a static, read-only designer.
+  let mode: DesignerMode = 'edit'
+  const clientId = '/@vue-designer/client'
+  const staticPreviewId = '\0vue-designer:static-preview'
+  const staticDocumentId = '\0vue-designer:static-document'
+  let designerHtmlId = ''
+  let previewHtmlId = ''
+
+  function runtimeConfig(): DesignerRuntimeConfig {
+    const readonly = mode === 'readonly'
+    return {
+      mode,
+      previewOrigin: readonly ? '' : previewOrigin,
+      framework: {
+        ...options.framework.client,
+        capabilities: {
+          styles: !!options.framework.styles,
+          components: !!options.framework.components && options.components !== undefined,
+          ai: !readonly && !!options.framework.ai && !!options.ai,
+        },
+      },
+      documentRoots: roots,
+      documentPatterns: patterns,
+    }
+  }
+
+  function loadAiModels(aiOptions: CursorAiOptions): Promise<DesignerAiModel[]> {
+    aiModels ??= listAiModels(aiOptions).catch((cause: unknown) => {
+      aiModels = undefined
+      throw cause
+    })
+    return aiModels
+  }
+
+  async function discoverDocuments(): Promise<DesignerDocumentSummary[]> {
+    const files = await fg(patterns, {
+      absolute: true,
+      cwd: config.root,
+      onlyFiles: true,
+      unique: true,
+    })
+
+    documentFiles = new Map(
+      files.map((absolutePath) => {
+        const relativePath = path.relative(config.root, absolutePath).replaceAll('\\', '/')
+        return [relativePath, path.resolve(absolutePath)]
+      }),
+    )
+
+    return [...documentFiles.keys()].sort().map((relativePath) => ({
+      path: relativePath,
+      name: path.basename(relativePath, path.extname(relativePath)),
+    }))
+  }
+
+  async function listDocuments(): Promise<DesignerDocumentSummary[]> {
+    const summaries = await discoverDocuments()
+    return Promise.all(summaries.map(async (summary) => {
+      try {
+        const stats = await fs.stat(documentFiles.get(summary.path)!)
+        return { ...summary, modified: Math.round(stats.mtimeMs) }
+      } catch {
+        return summary
+      }
+    }))
+  }
+
+  async function readDocument(relativePath: string, absolutePath: string): Promise<DesignerDocument> {
+    const source = await fs.readFile(absolutePath, 'utf8')
+    const parsed = options.framework.parse(context(relativePath, absolutePath, source))
+    return {
+      path: relativePath,
+      name: path.basename(relativePath, path.extname(relativePath)),
+      source,
+      revision: revision(source),
+      tree: parsed.tree,
+      diagnostics: parsed.diagnostics,
+    }
+  }
+
+  async function createDocument(body: unknown): Promise<{ status: number; body: unknown }> {
+    if (!options.framework.createDocument) {
+      return { status: 404, body: { error: 'Creating documents is not supported by this framework' } }
+    }
+    if (!isCreateDocumentRequest(body)) return { status: 400, body: { error: 'Invalid document request' } }
+    const resolved = resolveNewDocumentPath(config.root, patterns, body, options.framework.client.fileExtension)
+    if ('error' in resolved) return { status: 400, body: { error: resolved.error } }
+    const directory = path.dirname(resolved.absolutePath)
+    await fs.mkdir(directory, { recursive: true })
+    // Reject folders that escape the project through a symbolic link.
+    const [realRoot, realDirectory] = await Promise.all([fs.realpath(config.root), fs.realpath(directory)])
+    const confined = path.relative(realRoot, realDirectory)
+    if (confined.startsWith('..') || path.isAbsolute(confined)) {
+      return { status: 400, body: { error: 'The folder must be inside the project' } }
+    }
+    const name = path.basename(resolved.path, path.extname(resolved.path))
+    const source = options.framework.createDocument({ name, path: resolved.path })
+    const parseError = options.framework.parse(context(resolved.path, resolved.absolutePath, source))
+      .diagnostics.find((item) => item.severity === 'error')
+    if (parseError) return { status: 500, body: { error: `Starter document is invalid: ${parseError.message}` } }
+    try {
+      await fs.writeFile(resolved.absolutePath, source, { encoding: 'utf8', flag: 'wx' })
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === 'EEXIST') {
+        return { status: 409, body: { error: `${resolved.path} already exists` } }
+      }
+      throw cause
+    }
+    await discoverDocuments()
+    const summary: DesignerDocumentSummary = { path: resolved.path, name, modified: Date.now() }
+    return { status: 201, body: summary }
+  }
+
+  async function resolveDocument(relativePath: string): Promise<string | undefined> {
+    await discoverDocuments()
+    return documentFiles.get(relativePath)
+  }
+
+  function context(path: string, absolutePath: string, source: string): DesignerDocumentContext {
+    return { path, absolutePath, source }
+  }
+
+  function storeCandidate(path: string, source: string): string {
+    const candidateId = randomUUID()
+    candidates.set(candidateId, { path, source })
+    if (candidates.size > 50) candidates.delete(candidates.keys().next().value!)
+    return candidateId
+  }
+
+  return {
+    name: 'vue-designer',
+    enforce: 'pre',
+    config(userConfig, env) {
+      const frameworkConfig = options.framework.config ?? {}
+      if (env.command !== 'build' || env.isSsrBuild) return frameworkConfig
+      mode = 'readonly'
+      const root = path.resolve(userConfig.root ?? '')
+      designerHtmlId = normalizePath(path.join(root, 'index.html'))
+      previewHtmlId = normalizePath(path.join(root, '__designer/preview.html'))
+      return mergeConfig(frameworkConfig, {
+        build: {
+          // Preview entries use top-level await to load the document and app setup.
+          target: 'es2022',
+          rollupOptions: { input: { index: designerHtmlId, preview: previewHtmlId } },
+        },
+      } satisfies UserConfig)
+    },
+    async buildStart() {
+      if (mode === 'readonly') await discoverDocuments()
+    },
+    async resolveId(id) {
+      if (mode === 'readonly') {
+        const normalized = normalizePath(id)
+        if (normalized === designerHtmlId || normalized === previewHtmlId) return normalized
+        if (id === '/__designer/static-preview.js') return staticPreviewId
+        if (id === '/__designer/static-document.js') return staticDocumentId
+      }
+      if (id === clientId) return designerEntry
+      if (options.framework.preview.resolveCandidateId(id)) return id
+      if (id.startsWith('/__designer/preview-entry.js?')) {
+        return `${previewEntryPrefix}${id.slice(id.indexOf('?') + 1)}`
+      }
+      if (id.startsWith('/__designer/candidate?')) {
+        const candidateId = new URLSearchParams(id.slice(id.indexOf('?') + 1)).get('id') ?? ''
+        const candidate = candidates.get(candidateId)
+        if (!candidate) throw new Error('Preview candidate expired')
+        const absolutePath = await resolveDocument(candidate.path)
+        if (!absolutePath) throw new Error('Preview document not found')
+        return options.framework.preview.createCandidateId(absolutePath, candidateId)
+      }
+    },
+    async load(id) {
+      if (mode === 'readonly') {
+        if (id === designerHtmlId) return designerShell('readonly', clientId)
+        if (id === previewHtmlId) {
+          return `<!doctype html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body><div id="app"></div><script type="module" src="/__designer/static-preview.js"></script></body></html>`
+        }
+        if (id === staticPreviewId) {
+          const appPath = options.app ? normalizePath(path.resolve(config.root, options.app)) : undefined
+          const frameworkEntry = options.framework.preview.createEntry({
+            documentImport: '/__designer/static-document.js',
+            appImport: appPath,
+          })
+          return previewModule(`new URLSearchParams(location.search).get('session') ?? ''`, frameworkEntry, false)
+        }
+        if (id === staticDocumentId) {
+          const loaders = [...documentFiles].map(([relativePath, absolutePath]) =>
+            `  ${JSON.stringify(relativePath)}: () => import(${JSON.stringify(normalizePath(options.framework.preview.createDocumentId(absolutePath)))}),`)
+          return `const loaders = {\n${loaders.join('\n')}\n}
+const load = loaders[new URLSearchParams(location.search).get('path') ?? '']
+if (!load) throw new Error('Preview document not found')
+export default (await load()).default
+`
+        }
+      }
+      const candidateReference = options.framework.preview.resolveCandidateId(id)
+      if (candidateReference?.root) {
+        const candidate = candidates.get(candidateReference.candidateId)
+        if (!candidate) throw new Error('Preview candidate expired')
+        return candidate.source
+      }
+      if (!id.startsWith(previewEntryPrefix)) return
+
+      const params = new URLSearchParams(id.slice(previewEntryPrefix.length))
+      const relativePath = params.get('path') ?? ''
+      const previewSession = params.get('session') ?? ''
+      if (!previewSession) throw new Error('Preview session is required')
+      const absolutePath = await resolveDocument(relativePath)
+      if (!absolutePath) throw new Error('Preview document not found')
+      const candidateId = params.get('candidate')
+      const candidate = candidateId ? candidates.get(candidateId) : undefined
+      if (candidate && candidate.path !== relativePath) throw new Error('Preview candidate does not match document')
+
+      const appPath = options.app ? path.resolve(config.root, options.app) : null
+      const documentImport = candidateId && candidate
+        ? `/__designer/candidate?id=${encodeURIComponent(candidateId)}`
+        : options.framework.preview.createDocumentId(absolutePath)
+      const frameworkEntry = options.framework.preview.createEntry({
+        documentImport,
+        appImport: appPath ?? undefined,
+      })
+      return previewModule(JSON.stringify(previewSession), frameworkEntry, !!options.ai && !!options.framework.ai)
+    },
+    moduleParsed(info) {
+      if (mode !== 'readonly') return
+      // Vite drops scoped CSS whose owning module is unused. Static previews import documents
+      // through their preview identity, so scope document styles to that module instead.
+      const viteMeta = info.meta?.vite as { cssScopeTo?: [string, string] } | undefined
+      const owner = viteMeta?.cssScopeTo?.[0]
+      const document = owner ? [...documentFiles.values()].find((file) => normalizePath(file) === normalizePath(owner)) : undefined
+      if (viteMeta?.cssScopeTo && document) {
+        viteMeta.cssScopeTo = [normalizePath(options.framework.preview.createDocumentId(document)), viteMeta.cssScopeTo[1]]
+      }
     },
     transform(code, id) {
       const candidateReference = options.framework.preview.resolveCandidateId(id)
@@ -473,6 +697,37 @@ addEventListener('message', (event) => {
       const document = [...documentFiles].find(([, documentPath]) => path.resolve(documentPath) === filePath)
       if (!document || !options.framework.preview.isDocumentId(id, document[1])) return
       return options.framework.instrument({ ...context(document[0], document[1], code), id, code })
+    },
+    async generateBundle() {
+      if (mode !== 'readonly') return
+      const emit = (fileName: string, data: unknown) => this.emitFile({
+        type: 'asset',
+        fileName: `__designer/data/${fileName}`,
+        source: JSON.stringify(data),
+      })
+      const summaries = await listDocuments()
+      emit('config.json', runtimeConfig())
+      emit('documents.json', summaries)
+      for (const summary of summaries) {
+        const absolutePath = documentFiles.get(summary.path)!
+        const document = await readDocument(summary.path, absolutePath)
+        const styles = options.framework.styles
+        const styleRules = styles
+          ? Object.fromEntries(collectNodeIds(document.tree).map((nodeId) => [
+            nodeId,
+            styles.getRules(context(summary.path, absolutePath, document.source), nodeId),
+          ]))
+          : {}
+        const data: DesignerStaticDocument = { ...document, modified: summary.modified, styleRules }
+        emit(`documents/${summary.path}.json`, data)
+      }
+      const componentsHook = options.framework.components
+      if (componentsHook && options.components !== undefined) {
+        const componentsContext = { config, options: options.components }
+        const listed = await componentsHook.list(componentsContext)
+        emit('components.json', await Promise.all(listed.map(async (component) =>
+          component.metaLoaded ? component : await componentsHook.meta(componentsContext, component.id) ?? component)))
+      }
     },
     configResolved(resolvedConfig) {
       config = resolvedConfig
@@ -609,17 +864,7 @@ export function injectQuery(url) { return url }
 
           if (request.method === 'GET' && url.pathname === '/__designer/api/config') {
             if (!previewOrigin) return json(response, 503, { error: 'Preview server is starting' })
-            return json(response, 200, {
-              previewOrigin,
-              framework: {
-                ...options.framework.client,
-                capabilities: {
-                  styles: !!options.framework.styles,
-                  components: !!options.framework.components && options.components !== undefined,
-                  ai: !!options.framework.ai && !!options.ai,
-                },
-              },
-            })
+            return json(response, 200, runtimeConfig())
           }
 
           if (url.pathname.startsWith('/__designer/api/')
@@ -628,7 +873,12 @@ export function injectQuery(url) { return url }
           }
 
           if (request.method === 'GET' && url.pathname === '/__designer/api/documents') {
-            return json(response, 200, await discoverDocuments())
+            return json(response, 200, await listDocuments())
+          }
+
+          if (request.method === 'POST' && url.pathname === '/__designer/api/documents') {
+            const result = await createDocument(await readBody(request))
+            return json(response, result.status, result.body)
           }
 
           if (request.method === 'GET' && (url.pathname === '/__designer/api/components'
@@ -790,17 +1040,7 @@ export function injectQuery(url) { return url }
             if (!absolutePath) return json(response, 404, { error: 'Document not found' })
 
             if (request.method === 'GET') {
-              const source = await fs.readFile(absolutePath, 'utf8')
-              const parsed = options.framework.parse(context(relativePath, absolutePath, source))
-              const document: DesignerDocument = {
-                path: relativePath,
-                name: path.basename(relativePath, path.extname(relativePath)),
-                source,
-                revision: revision(source),
-                tree: parsed.tree,
-                diagnostics: parsed.diagnostics,
-              }
-              return json(response, 200, document)
+              return json(response, 200, await readDocument(relativePath, absolutePath))
             }
 
             if (request.method === 'PUT') {
@@ -862,10 +1102,18 @@ export function injectQuery(url) { return url }
             return response.end(`import ${JSON.stringify(`/@fs/${designerEntry.replaceAll('\\', '/')}`)}`)
           }
 
-          if (request.method === 'GET' && (url.pathname === '/__designer' || url.pathname === '/__designer/')) {
+          // The designer replaces the host app's entry page during development.
+          if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
             response.statusCode = 200
             response.setHeader('Content-Type', 'text/html; charset=utf-8')
-            return response.end(`<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vue Designer</title></head><body><div id="app"></div><script type="module" src="/__designer/client.js"></script></body></html>`)
+            response.setHeader('Cache-Control', 'no-store')
+            return response.end(designerShell('edit', '/__designer/client.js'))
+          }
+
+          if (request.method === 'GET' && (url.pathname === '/__designer' || url.pathname === '/__designer/')) {
+            response.statusCode = 302
+            response.setHeader('Location', '/')
+            return response.end()
           }
 
           next()

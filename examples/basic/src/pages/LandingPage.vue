@@ -17,7 +17,7 @@ import NoticeBadge from '../components/NoticeBadge.vue'
       <p class="eyebrow">A calmer way to make software</p>
       <h1>Ideas deserve<br><em>room to grow.</em></h1>
       <p class="intro">Shape thoughtful digital products with a toolkit made for clarity, collaboration, and momentum.</p>
-      <AppButton>Explore the toolkit
+      <AppButton tone="lime">Explore the toolkit
       </AppButton>
       
     </section>

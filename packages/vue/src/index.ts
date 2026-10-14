@@ -15,7 +15,7 @@ export interface VueDesignerOptions extends VuePluginOptions {}
 
 interface VueComponentsHookContext {
   config: ResolvedConfig
-  server: ViteDevServer
+  server?: ViteDevServer
   options: VueComponentsOptions | VueComponentSource[]
 }
 
@@ -37,6 +37,26 @@ export function resolveCandidateFileId(id: string): { candidateId: string; root:
 
 export function createPreviewDocumentId(absolutePath: string): string {
   return `${absolutePath}?vue-designer-preview`
+}
+
+/** Starter SFC for a document created from the designer. */
+export function createVueDocument(name: string): string {
+  const title = name.replace(/[-_]+/g, ' ').replace(/([a-z0-9])([A-Z])/g, '$1 $2').trim()
+  return `<script setup lang="ts">
+</script>
+
+<template>
+  <main class="page">
+    <h1>${title}</h1>
+  </main>
+</template>
+
+<style scoped>
+.page {
+  padding: 32px;
+}
+</style>
+`
 }
 
 export function extractVueSource(result: string): string {
@@ -132,6 +152,9 @@ if (import.meta.hot) import.meta.hot.dispose(() => app.unmount())
           throw new DesignerOperationError(cause instanceof Error ? cause.message : 'Unable to apply style operation')
         }
       },
+    },
+    createDocument(context: { name: string }) {
+      return createVueDocument(context.name)
     },
     components: {
       list(context: VueComponentsHookContext) {
