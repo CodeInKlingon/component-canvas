@@ -72,6 +72,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .empty-state { color: var(--muted); padding: 24px 15px; font-size: 14px; line-height: 1.6; }
 .palette-intro { margin: 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 10px; color: var(--muted); font-size: 14px; }
 .palette-intro strong { color: var(--text); }
+.palette-search { display: block; width: calc(100% - 20px); margin: 0 10px 2px; border: 1px solid var(--border); border-radius: 6px; outline: 0; background: var(--background); color: var(--text); padding: 7px 9px; font-size: 14px; }
+.insert-picker-content .palette-search { margin-top: 8px; }
 .layers-heading { padding: 15px 12px 8px; color: var(--muted); font-size: 14px; font-weight: 650; letter-spacing: .03em; text-transform: uppercase; }
 .component-palette { display: grid; gap: 5px; padding: 0 10px 8px; }
 .component-palette button { min-width: 0; display: grid; grid-template-columns: 26px 1fr 14px; align-items: center; gap: 8px; border: 1px solid transparent; border-radius: var(--radius); background: transparent; padding: 7px; text-align: left; }

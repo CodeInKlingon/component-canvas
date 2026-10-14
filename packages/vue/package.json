@@ -19,6 +19,8 @@
     "@vue-designer/shared": "workspace:*",
     "@vue/compiler-dom": "^3.5.17",
     "@vue/compiler-sfc": "^3.5.17",
+    "@vue/shared": "^3.5.17",
+    "fast-glob": "^3.3.3",
     "postcss": "^8.5.6",
     "vue-component-meta": "^3.3.9"
   },

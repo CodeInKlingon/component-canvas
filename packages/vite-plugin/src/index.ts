@@ -35,7 +35,13 @@ export interface DesignerDocumentContext {
   source: string
 }
 
-export interface DesignerFramework {
+export interface DesignerComponentsContext<TOptions = unknown> {
+  config: ResolvedConfig
+  server: ViteDevServer
+  options: TOptions
+}
+
+export interface DesignerFramework<TComponentOptions = any> {
   id: string
   client: DesignerFrameworkClientMetadata
   vite?: PluginOption
@@ -55,7 +61,11 @@ export interface DesignerFramework {
     applyOperation(context: DesignerDocumentContext, operation: DesignerStyleOperation): string
   }
   components?: {
-    load(context: { config: ResolvedConfig; server: ViteDevServer; registryPath: string }): Promise<DesignerComponentMetadata[]>
+    /** Lists discovered components. Props, events, and slots may be deferred to `meta`. */
+    list(context: DesignerComponentsContext<TComponentOptions>): Promise<DesignerComponentMetadata[]>
+    meta(context: DesignerComponentsContext<TComponentOptions>, id: string): Promise<DesignerComponentMetadata | undefined>
+    /** Returns true when the component list may have changed. */
+    fileChanged?(context: DesignerComponentsContext<TComponentOptions>, event: 'add' | 'change' | 'unlink', file: string): boolean | Promise<boolean>
   }
   ai?: {
     createPrompt(request: DesignerAiRequest): string
@@ -64,11 +74,14 @@ export interface DesignerFramework {
   }
 }
 
-export interface DesignerOptions {
-  framework: DesignerFramework
+export type DesignerComponentOptionsOf<TFramework> = TFramework extends DesignerFramework<infer TOptions> ? TOptions : never
+
+export interface DesignerOptions<TFramework extends DesignerFramework = DesignerFramework> {
+  framework: TFramework
   documents: string | string[]
   app?: string
-  components?: string
+  /** Component sources for the palette and props inspector, interpreted by the framework. */
+  components?: DesignerComponentOptionsOf<TFramework>
   previewPort?: number
   ai?: CursorAiOptions
 }
@@ -552,6 +565,21 @@ export function injectQuery(url) { return url }
       if (server.httpServer?.listening) startPreviewServer()
       else server.httpServer?.once('listening', startPreviewServer)
 
+      const componentsHook = options.framework.components
+      if (componentsHook?.fileChanged && options.components !== undefined) {
+        const componentsContext = { config, server, options: options.components }
+        for (const event of ['add', 'change', 'unlink'] as const) {
+          server.watcher.on(event, async (changedPath) => {
+            try {
+              if (await componentsHook.fileChanged!(componentsContext, event, path.resolve(changedPath))) {
+                server.ws.send({ type: 'custom', event: 'vue-designer:components-changed', data: {} })
+              }
+            } catch (cause) {
+              config.logger.warn(`[vue-designer] Unable to refresh components: ${cause instanceof Error ? cause.message : String(cause)}`)
+            }
+          })
+        }
+      }
       server.watcher.on('change', async (changedPath) => {
         const absoluteChangedPath = path.resolve(changedPath)
         const entry = [...documentFiles].find(([, absolutePath]) => path.resolve(absolutePath) === absoluteChangedPath)
@@ -587,7 +615,7 @@ export function injectQuery(url) { return url }
                 ...options.framework.client,
                 capabilities: {
                   styles: !!options.framework.styles,
-                  components: !!options.framework.components && !!options.components,
+                  components: !!options.framework.components && options.components !== undefined,
                   ai: !!options.framework.ai && !!options.ai,
                 },
               },
@@ -603,14 +631,22 @@ export function injectQuery(url) { return url }
             return json(response, 200, await discoverDocuments())
           }
 
-          if (request.method === 'GET' && url.pathname === '/__designer/api/components') {
+          if (request.method === 'GET' && (url.pathname === '/__designer/api/components'
+            || url.pathname === '/__designer/api/components/meta')) {
             if (!options.framework.components) {
               return json(response, 404, { error: 'Component metadata is not supported by this framework' })
             }
-            if (!options.components) return json(response, 200, [])
-            const registryPath = path.resolve(config.root, options.components)
-            const components = await options.framework.components.load({ config, server, registryPath })
-            return json(response, 200, components)
+            if (options.components === undefined) {
+              return url.pathname.endsWith('/meta')
+                ? json(response, 404, { error: 'Component not found' })
+                : json(response, 200, [])
+            }
+            const componentsContext = { config, server, options: options.components }
+            if (url.pathname.endsWith('/meta')) {
+              const component = await options.framework.components.meta(componentsContext, url.searchParams.get('id') ?? '')
+              return component ? json(response, 200, component) : json(response, 404, { error: 'Component not found' })
+            }
+            return json(response, 200, await options.framework.components.list(componentsContext))
           }
 
           if (request.method === 'POST' && url.pathname === '/__designer/api/candidate') {
@@ -845,7 +881,7 @@ export function injectQuery(url) { return url }
   }
 }
 
-export default function designer(options: DesignerOptions): PluginOption {
+export default function designer<TFramework extends DesignerFramework>(options: DesignerOptions<TFramework>): PluginOption {
   if (!options.framework) throw new Error('A designer framework is required')
   return [createDesignerPlugin(options), options.framework.vite]
 }

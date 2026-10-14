@@ -1,22 +1,25 @@
-import path from 'node:path'
 import vuePlugin, { type Options as VuePluginOptions } from '@vitejs/plugin-vue'
-import { createChecker, type ComponentMetaChecker, type PropertyMetaSchema } from 'vue-component-meta'
 import { DesignerOperationError } from '@vue-designer/shared'
 import type {
   DesignerAiRequest,
-  DesignerComponentMetadata,
   DesignerFrameworkClientMetadata,
   DesignerSourceOperation,
   DesignerStyleOperation,
 } from '@vue-designer/shared'
 import type { ResolvedConfig, ViteDevServer } from 'vite'
+import { createVueComponents, type VueComponentSource, type VueComponentsOptions } from './components.js'
 import { applySourceOperationWithResult, instrumentDesignerNodes, parseDesignerDocument } from './parse.js'
 import { applyStyleOperation, getDesignerStyleRules } from './style.js'
 
 export interface VueDesignerOptions extends VuePluginOptions {}
 
+interface VueComponentsHookContext {
+  config: ResolvedConfig
+  server: ViteDevServer
+  options: VueComponentsOptions | VueComponentSource[]
+}
+
 const candidateMarker = '.vue-designer-candidate-'
-let componentChecker: ComponentMetaChecker | undefined
 
 export function createCandidateFileId(absolutePath: string, candidateId: string): string {
   return `${absolutePath}${candidateMarker}${candidateId}.vue`
@@ -36,28 +39,6 @@ export function createPreviewDocumentId(absolutePath: string): string {
   return `${absolutePath}?vue-designer-preview`
 }
 
-function literalOptions(schema: PropertyMetaSchema): string[] {
-  if (typeof schema === 'string') return []
-  if (schema.kind === 'literal') return [schema.value.replace(/^(['"])(.*)\1$/, '$2')]
-  if (schema.kind === 'enum') {
-    return (schema.schema ?? []).flatMap((value) => typeof value === 'string'
-      ? [value.replace(/^(['"])(.*)\1$/, '$2')]
-      : literalOptions(value))
-  }
-  return []
-}
-
-function inferControl(type: string, schema: PropertyMetaSchema): {
-  control: 'text' | 'number' | 'checkbox' | 'select'
-  options?: string[]
-} {
-  const options = literalOptions(schema).filter((value) => value !== 'undefined')
-  if (/(^|\W)boolean(\W|$)/.test(type)) return { control: 'checkbox' }
-  if (/(^|\W)number(\W|$)/.test(type)) return { control: 'number' }
-  if (options.length > 1) return { control: 'select', options }
-  return { control: 'text' }
-}
-
 export function extractVueSource(result: string): string {
   const matches = [...result.matchAll(/```vue\s*\r?\n([\s\S]*?)\r?\n```/g)]
   if (matches.length !== 1 || !matches[0]?.[1]) {
@@ -72,6 +53,7 @@ export default function vue(options: VueDesignerOptions = {}) {
     __VUE_PROD_DEVTOOLS__: 'false',
     __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: 'false',
   }
+  const components = createVueComponents()
   const client: DesignerFrameworkClientMetadata = {
     id: 'vue',
     sourceLanguage: 'vue',
@@ -152,45 +134,14 @@ if (import.meta.hot) import.meta.hot.dispose(() => app.unmount())
       },
     },
     components: {
-      async load(context: { config: ResolvedConfig; server: ViteDevServer; registryPath: string }): Promise<DesignerComponentMetadata[]> {
-        const module = await context.server.ssrLoadModule(context.registryPath)
-        const registry = module.default as Record<string, Record<string, unknown>>
-        return Object.entries(registry).map(([name, entry]) => {
-          if (typeof entry.source !== 'string') throw new Error(`Component ${name} must define a source module`)
-          const absoluteSource = path.resolve(path.dirname(context.registryPath), entry.source)
-          componentChecker ??= createChecker(path.resolve(context.config.root, 'tsconfig.json'), { schema: true })
-          const inferred = componentChecker.getComponentMeta(absoluteSource)
-          const overrides = entry.props && typeof entry.props === 'object'
-            ? entry.props as Record<string, Record<string, unknown>>
-            : {}
-          return {
-            name,
-            label: typeof entry.label === 'string' ? entry.label : name,
-            category: typeof entry.category === 'string' ? entry.category : 'Components',
-            source: path.relative(context.config.root, absoluteSource).replaceAll('\\', '/'),
-            defaultContent: typeof entry.defaultContent === 'string' ? entry.defaultContent : undefined,
-            props: inferred.props.filter((prop) => !prop.global).map((prop) => {
-              const inferredControl = inferControl(prop.type, prop.schema)
-              const override = overrides[prop.name] ?? {}
-              const control = ['text', 'number', 'checkbox', 'select', 'color'].includes(String(override.control))
-                ? override.control as DesignerComponentMetadata['props'][number]['control']
-                : inferredControl.control
-              return {
-                name: prop.name,
-                type: prop.type,
-                description: prop.description,
-                required: prop.required,
-                default: prop.default,
-                control,
-                options: Array.isArray(override.options)
-                  ? override.options.filter((value): value is string => typeof value === 'string')
-                  : inferredControl.options,
-              }
-            }),
-            events: inferred.events.map((event) => ({ name: event.name, description: event.description })),
-            slots: inferred.slots.map((slot) => ({ name: slot.name, description: slot.description })),
-          }
-        })
+      list(context: VueComponentsHookContext) {
+        return components.list({ root: context.config.root, options: context.options })
+      },
+      meta(context: VueComponentsHookContext, id: string) {
+        return components.meta({ root: context.config.root, options: context.options }, id)
+      },
+      fileChanged(context: VueComponentsHookContext, event: 'add' | 'change' | 'unlink', file: string) {
+        return components.fileChanged({ root: context.config.root, options: context.options }, event, file)
       },
     },
     ai: {
@@ -225,3 +176,14 @@ ${request.source}
 
 export { applySourceOperationWithResult, instrumentDesignerNodes, parseDesignerDocument } from './parse.js'
 export { applyStyleOperation, getDesignerStyleRules } from './style.js'
+export {
+  componentTag,
+  toPascalName,
+  type VueComponentImportMode,
+  type VueComponentOverride,
+  type VueComponentSource,
+  type VueComponentsOptions,
+  type VueComponentTagCase,
+  type VueLibraryComponentSource,
+  type VueLocalComponentSource,
+} from './components.js'

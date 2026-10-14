@@ -119,6 +119,12 @@ importers:
       '@vue/compiler-sfc':
         specifier: ^3.5.17
         version: 3.5.41
+      '@vue/shared':
+        specifier: ^3.5.17
+        version: 3.5.41
+      fast-glob:
+        specifier: ^3.3.3
+        version: 3.3.3
       postcss:
         specifier: ^8.5.6
         version: 8.5.26

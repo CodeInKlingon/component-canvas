@@ -47,7 +47,7 @@ describe('framework delegation', () => {
   let server: ViteDevServer
   let base: string
 
-  async function start(framework: DesignerFramework, options: { components?: string; ai?: object } = {}) {
+  async function start(framework: DesignerFramework, options: { components?: unknown; ai?: object } = {}) {
     server = await createServer({
       root,
       logLevel: 'silent',
@@ -150,5 +150,33 @@ describe('framework delegation', () => {
     expect((await fetch(`${base}/__designer/api/styles`, { method: 'POST', headers, body: '{}' })).status).toBe(404)
     expect((await fetch(`${base}/__designer/api/style-candidate`, { method: 'POST', headers, body: '{}' })).status).toBe(404)
     expect((await fetch(`${base}/__designer/api/ai`, { method: 'POST', headers, body: '{}' })).status).toBe(404)
+  })
+
+  it('passes inline component options to the framework and refreshes on file changes', async () => {
+    const component = {
+      id: 'local:Card', name: 'Card', tag: 'Card', label: 'Card', category: 'Components',
+      library: { id: 'local', label: 'Components' }, import: null, metaLoaded: false, props: [], events: [], slots: [],
+    }
+    const components = {
+      list: vi.fn(async () => [component]),
+      meta: vi.fn(async (_context, id: string) => id === component.id ? { ...component, metaLoaded: true } : undefined),
+      fileChanged: vi.fn(async () => true),
+    }
+    const componentOptions = { sources: ['src/**/*.fake'] }
+    await start(fakeFramework({ components }), { components: componentOptions })
+    const config = await fetch(`${base}/__designer/api/config`).then((response) => response.json()) as Record<string, any>
+    expect(config.framework.capabilities.components).toBe(true)
+
+    const headers = await authorizedHeaders()
+    expect(await fetch(`${base}/__designer/api/components`, { headers }).then((response) => response.json())).toEqual([component])
+    expect(components.list).toHaveBeenCalledWith(expect.objectContaining({ options: componentOptions }))
+    const meta = await fetch(`${base}/__designer/api/components/meta?id=local%3ACard`, { headers })
+    expect(await meta.json()).toMatchObject({ id: 'local:Card', metaLoaded: true })
+    expect((await fetch(`${base}/__designer/api/components/meta?id=missing`, { headers })).status).toBe(404)
+
+    const sent = vi.spyOn(server.ws, 'send')
+    server.watcher.emit('add', path.join(root, 'Card.fake'))
+    await vi.waitFor(() => expect(sent).toHaveBeenCalledWith(expect.objectContaining({ event: 'vue-designer:components-changed' })))
+    expect(components.fileChanged).toHaveBeenCalledWith(expect.anything(), 'add', path.join(root, 'Card.fake'))
   })
 })

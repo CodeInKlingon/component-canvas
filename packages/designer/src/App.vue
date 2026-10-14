@@ -53,6 +53,7 @@ import SourceEditor from './SourceEditor.vue'
 import { SourceHistory } from './history'
 import { findNode, findNodeAtOffset, findNodeAtPath, findNodePath, findRenderedSelection, reconcileCollapsedTree } from './selection'
 import { nativeElements, type NativeElementMetadata } from './native-elements'
+import { createInsertComponentOperation, findComponentForTag, groupComponents } from './component-palette'
 import { captureDragSelection, findDragSelectionOffset, type DragSelection } from './drag-selection'
 import { nodeClipboardMime, parseNodeClipboard, serializeNodeClipboard, type NodeClipboardPayload } from './node-clipboard'
 import { clampZoom, fitZoom, viewportPresets, zoomAroundPoint, type ViewportMode } from './canvas'
@@ -63,6 +64,7 @@ type SaveState = 'clean' | 'dirty' | 'saving' | 'conflict'
 
 const documents = ref<DesignerDocumentSummary[]>([])
 const components = ref<DesignerComponentMetadata[]>([])
+const componentQuery = ref('')
 const activeDocument = ref<DesignerDocument | null>(null)
 const source = ref('')
 const error = ref('')
@@ -131,8 +133,15 @@ let escapeDeselecting = false
 
 const selectedNode = computed(() => findNode(activeDocument.value?.tree ?? [], selectedNodeId.value))
 const selectedComponent = computed(() => selectedNode.value?.kind === 'component'
-  ? components.value.find((component) => component.name === selectedNode.value?.label) ?? null
+  ? findComponentForTag(components.value, selectedNode.value.label)
   : null)
+const componentGroups = computed(() => groupComponents(components.value, componentQuery.value))
+const pendingComponentMeta = new Set<string>()
+watch(selectedComponent, (component) => {
+  if (!component || component.metaLoaded || pendingComponentMeta.has(component.id)) return
+  pendingComponentMeta.add(component.id)
+  void loadComponentMeta(component).finally(() => pendingComponentMeta.delete(component.id))
+}, { immediate: true })
 const selectedNative = computed(() => selectedNode.value?.kind === 'element'
   ? nativeElements.find((element) => element.tag === selectedNode.value?.label) ?? null
   : null)
@@ -212,14 +221,11 @@ async function loadDocuments(): Promise<void> {
   try {
     const config = await api<{ previewOrigin: string; framework: DesignerFrameworkClientMetadata }>('/__designer/api/config')
     framework.value = config.framework
-    const [loadedDocuments, loadedComponents] = await Promise.all([
+    const [loadedDocuments] = await Promise.all([
       api<DesignerDocumentSummary[]>('/__designer/api/documents'),
-      config.framework.capabilities.components
-        ? api<DesignerComponentMetadata[]>('/__designer/api/components')
-        : Promise.resolve([]),
+      loadComponents(),
     ])
     documents.value = loadedDocuments
-    components.value = loadedComponents
     previewOrigin.value = config.previewOrigin
     aiEnabled.value = config.framework.capabilities.ai
     if (documents.value[0]) await openDocument(documents.value[0])
@@ -230,15 +236,30 @@ async function loadDocuments(): Promise<void> {
   }
 }
 
-function relativeImport(documentPath: string, componentPath: string): string {
-  const from = documentPath.split('/').slice(0, -1)
-  const to = componentPath.split('/')
-  while (from[0] && from[0] === to[0]) {
-    from.shift()
-    to.shift()
+async function loadComponents(): Promise<void> {
+  if (!framework.value?.capabilities.components) {
+    components.value = []
+    return
   }
-  const relative = `${from.map(() => '..').join('/')}${from.length && to.length ? '/' : ''}${to.join('/')}`
-  return relative.startsWith('.') ? relative : `./${relative}`
+  const loaded = await api<DesignerComponentMetadata[]>('/__designer/api/components')
+  const previous = new Map(components.value.map((component) => [component.id, component]))
+  components.value = loaded.map((component) => previous.get(component.id)?.metaLoaded ? previous.get(component.id)! : component)
+}
+
+async function loadComponentMeta(component: DesignerComponentMetadata): Promise<void> {
+  try {
+    const loaded = await api<DesignerComponentMetadata>(`/__designer/api/components/meta?id=${encodeURIComponent(component.id)}`)
+    components.value = components.value.map((item) => item.id === loaded.id ? loaded : item)
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : 'Unable to load component metadata'
+  }
+}
+
+function handleComponentsChanged(): void {
+  components.value = components.value.map((component) => ({ ...component, metaLoaded: false }))
+  void loadComponents().catch((cause: unknown) => {
+    error.value = cause instanceof Error ? cause.message : 'Unable to load components'
+  })
 }
 
 function insertComponent(component: DesignerComponentMetadata, target = selectedNode.value, position: 'inside' | 'after' = 'inside'): void {
@@ -246,14 +267,7 @@ function insertComponent(component: DesignerComponentMetadata, target = selected
   const parent = target
   if (!framework.value?.capabilities.components || !document || !parent || !parent.editable
     || (position === 'inside' && !parent.capabilities.canContainChildren)) return
-  void applyOperation({
-    type: 'insert-component',
-    parentId: parent.id,
-    name: component.name,
-    importSource: relativeImport(document.path, component.source),
-    defaultContent: component.defaultContent,
-    position,
-  })
+  void applyOperation(createInsertComponentOperation(component, document.path, parent.id, position))
 }
 
 function openInsertPicker(position: 'inside' | 'after'): void {
@@ -366,7 +380,7 @@ function startComponentDrag(event: DragEvent, component: DesignerComponentMetada
   draggedNode.value = null
   draggedNative.value = null
   draggedComponent.value = component
-  event.dataTransfer?.setData('application/x-vue-designer-component', component.name)
+  event.dataTransfer?.setData('application/x-vue-designer-component', component.id)
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
 }
 
@@ -1173,6 +1187,7 @@ function handleKeyUp(event: KeyboardEvent): void {
 }
 
 import.meta.hot?.on('vue-designer:document-changed', handleExternalChange)
+import.meta.hot?.on('vue-designer:components-changed', handleComponentsChanged)
 
 onMounted(() => {
   window.addEventListener('keydown', handleShortcut)
@@ -1200,6 +1215,7 @@ onUnmounted(() => {
   window.clearTimeout(sourcePreviewTimer)
   window.clearTimeout(wheelPanTimer)
   import.meta.hot?.off('vue-designer:document-changed', handleExternalChange)
+  import.meta.hot?.off('vue-designer:components-changed', handleComponentsChanged)
 })
 </script>
 
@@ -1281,14 +1297,18 @@ onUnmounted(() => {
           </template>
           <template v-else>
             <div class="palette-intro">Insert into <strong>{{ selectedNode?.label ?? 'a selected container' }}</strong></div>
-            <div class="layers-heading">Project components</div>
-            <div class="component-palette">
-              <button v-for="component in components" :key="component.name" :disabled="!canContainChildren(selectedNode)" :title="selectedNode ? `Insert into ${selectedNode.label}` : 'Select a container first'" draggable="true" @dragstart="startComponentDrag($event, component)" @dragend="endTreeDrag" @click="insertComponent(component)">
-                <span class="component-glyph"><Component :size="14" /></span>
-                <span><strong>{{ component.label }}</strong><small>{{ component.category }}</small></span>
-                <Plus :size="13" />
-              </button>
-            </div>
+            <input v-if="components.length" v-model="componentQuery" class="palette-search" type="search" placeholder="Search components" aria-label="Search components">
+            <template v-for="group in componentGroups" :key="group.id">
+              <div class="layers-heading">{{ group.label }}</div>
+              <div class="component-palette">
+                <button v-for="component in group.components" :key="component.id" :disabled="!canContainChildren(selectedNode)" :title="selectedNode ? `Insert <${component.tag}> into ${selectedNode.label}` : 'Select a container first'" draggable="true" @dragstart="startComponentDrag($event, component)" @dragend="endTreeDrag" @click="insertComponent(component)">
+                  <span class="component-glyph"><Component :size="14" /></span>
+                  <span><strong>{{ component.label }}</strong><small>{{ component.category }}</small></span>
+                  <Plus :size="13" />
+                </button>
+              </div>
+            </template>
+            <div v-if="components.length && !componentGroups.length" class="empty-state">No components match “{{ componentQuery }}”.</div>
             <div class="layers-heading">Native elements</div>
             <div class="component-palette native-palette">
               <button v-for="element in nativeElements" :key="element.tag" :disabled="!canContainChildren(selectedNode)" :title="selectedNode ? `Insert into ${selectedNode.label}` : 'Select a container first'" draggable="true" @dragstart="startNativeDrag($event, element)" @dragend="endTreeDrag" @click="insertNative(element)">
@@ -1589,12 +1609,15 @@ onUnmounted(() => {
         </header>
         <div class="insert-picker-content">
           <section>
-            <h3>Project components</h3>
-            <div class="component-palette">
-              <button v-for="component in components" :key="component.name" @click="pickComponent(component)">
-                <span class="component-glyph"><Component :size="14" /></span><span><strong>{{ component.label }}</strong><small>{{ component.category }}</small></span><Plus :size="13" />
-              </button>
-            </div>
+            <input v-if="components.length" v-model="componentQuery" class="palette-search" type="search" placeholder="Search components" aria-label="Search components">
+            <template v-for="group in componentGroups" :key="group.id">
+              <h3>{{ group.label }}</h3>
+              <div class="component-palette">
+                <button v-for="component in group.components" :key="component.id" @click="pickComponent(component)">
+                  <span class="component-glyph"><Component :size="14" /></span><span><strong>{{ component.label }}</strong><small>{{ component.category }}</small></span><Plus :size="13" />
+                </button>
+              </div>
+            </template>
           </section>
           <section>
             <h3>Native elements</h3>

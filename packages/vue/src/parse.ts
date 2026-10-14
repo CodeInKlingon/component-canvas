@@ -1,5 +1,5 @@
 import { NodeTypes, parse as parseTemplate, type TemplateChildNode } from '@vue/compiler-dom'
-import { parse as parseSfc } from '@vue/compiler-sfc'
+import { babelParse, parse as parseSfc, type SFCScriptBlock } from '@vue/compiler-sfc'
 import type {
   DesignerAttribute,
   DesignerDiagnostic,
@@ -13,6 +13,71 @@ interface ParseState {
   nextId: number
   templateOffset: number
   insertions: Array<{ offset: number; text: string }>
+}
+
+interface ScriptBinding {
+  source?: string
+  imported?: string
+}
+
+function scriptBindings(block: SFCScriptBlock): Map<string, ScriptBinding> {
+  const plugins: Array<'typescript' | 'jsx'> = []
+  if (block.lang === 'ts' || block.lang === 'tsx') plugins.push('typescript')
+  if (block.lang === 'tsx' || block.lang === 'jsx') plugins.push('jsx')
+  const program = babelParse(block.content, { sourceType: 'module', plugins }).program
+  const bindings = new Map<string, ScriptBinding>()
+  for (const statement of program.body) {
+    if (statement.type === 'ImportDeclaration') {
+      if (statement.importKind === 'type') continue
+      for (const specifier of statement.specifiers) {
+        if (specifier.type === 'ImportSpecifier' && specifier.importKind === 'type') continue
+        const imported = specifier.type === 'ImportDefaultSpecifier'
+          ? 'default'
+          : specifier.type === 'ImportNamespaceSpecifier'
+            ? '*'
+            : specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value
+        bindings.set(specifier.local.name, { source: statement.source.value, imported })
+      }
+      continue
+    }
+    const declaration = statement.type === 'ExportNamedDeclaration' ? statement.declaration : statement
+    if (declaration?.type === 'VariableDeclaration') {
+      for (const declarator of declaration.declarations) {
+        if (declarator.id.type === 'Identifier') bindings.set(declarator.id.name, {})
+      }
+    } else if ((declaration?.type === 'FunctionDeclaration' || declaration?.type === 'ClassDeclaration') && declaration.id) {
+      bindings.set(declaration.id.name, {})
+    }
+  }
+  return bindings
+}
+
+function ensureImport(source: string, specifier: { from: string; imported: string; local: string }): string {
+  if (/['\\\r\n]/.test(specifier.from)) throw new Error('Invalid component import source')
+  const sfc = parseSfc(source, { sourceMap: false }).descriptor
+  for (const block of [sfc.script, sfc.scriptSetup]) {
+    if (!block) continue
+    const existing = scriptBindings(block).get(specifier.local)
+    if (!existing) continue
+    if (existing.source === specifier.from && existing.imported === specifier.imported) return source
+    throw new Error(`${specifier.local} is already declared in the component script`)
+  }
+
+  const clause = specifier.imported === 'default'
+    ? specifier.local
+    : specifier.imported === specifier.local
+      ? `{ ${specifier.local} }`
+      : `{ ${specifier.imported} as ${specifier.local} }`
+  const statement = `import ${clause} from '${specifier.from}'\n`
+  if (sfc.scriptSetup) {
+    const content = sfc.scriptSetup.content
+    const insertAt = sfc.scriptSetup.loc.start.offset + content.length
+    const separator = content.length && !content.endsWith('\n') ? '\n' : ''
+    return `${source.slice(0, insertAt)}${separator}${statement}${source.slice(insertAt)}`
+  }
+  const lang = sfc.script?.lang ? ` lang="${sfc.script.lang}"` : ''
+  const at = sfc.template ? source.lastIndexOf('<template', sfc.template.loc.start.offset) : 0
+  return `${source.slice(0, at)}<script setup${lang}>\n${statement}</script>\n\n${source.slice(at)}`
 }
 
 const voidTags = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'])
@@ -284,25 +349,12 @@ export function applySourceOperationWithResult(source: string, operation: Design
     if (!node.editable || (position === 'inside' && node.kind === 'text')) throw new Error('Components can only be inserted at editable elements')
     if (position === 'inside' && node.kind === 'element' && voidTags.has(node.label)) throw new Error('The selected element cannot contain children')
     const insertion = insertionPoint(source, node, position)
-    const content = operation.defaultContent ?? operation.name
-    const markup = `<${operation.name}>${escapeText(content)}</${operation.name}>`
+    const content = operation.defaultContent ?? operation.tag
+    const markup = `<${operation.tag}>${escapeText(content)}</${operation.tag}>`
     const prefix = position === 'inside' ? `\n${insertion.indent}` : insertion.indent
     const suffix = position === 'inside' ? `\n${insertion.closingIndent ?? ''}` : '\n'
-    let result = `${source.slice(0, insertion.offset)}${prefix}${markup}${suffix}${source.slice(insertion.replaceEnd)}`
-
-    const sfc = parseSfc(result, { sourceMap: false }).descriptor
-    const importPattern = new RegExp(`\\bimport\\s+${operation.name}\\b`)
-    if (!importPattern.test(sfc.scriptSetup?.content ?? '')) {
-      const importStatement = `import ${operation.name} from '${operation.importSource}'\n`
-      if (sfc.scriptSetup) {
-        const insertAt = sfc.scriptSetup.loc.start.offset + sfc.scriptSetup.content.length
-        result = `${result.slice(0, insertAt)}${importStatement}${result.slice(insertAt)}`
-      } else {
-        const templateStart = result.indexOf('<template')
-        result = `${result.slice(0, templateStart)}<script setup>\n${importStatement}</script>\n\n${result.slice(templateStart)}`
-      }
-    }
-    return { source: result }
+    const result = `${source.slice(0, insertion.offset)}${prefix}${markup}${suffix}${source.slice(insertion.replaceEnd)}`
+    return { source: operation.import ? ensureImport(result, operation.import) : result }
   }
 
   if (operation.type === 'insert-native') {

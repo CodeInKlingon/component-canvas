@@ -1,0 +1,7 @@
+<script setup lang="ts">
+defineProps<{ modelValue?: string }>()
+</script>
+
+<template>
+  <input :value="modelValue">
+</template>

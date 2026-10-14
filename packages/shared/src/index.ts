@@ -132,12 +132,31 @@ export interface DesignerAiModelsResponse {
   defaultModel: string
 }
 
+export interface DesignerComponentImport {
+  /** `file` sources are root-relative paths; `package` sources are emitted verbatim. */
+  kind: 'file' | 'package'
+  from: string
+  /** `default` or the name of a named export. */
+  imported: string
+  local: string
+}
+
 export interface DesignerComponentMetadata {
+  /** Unique across libraries: `<library id>:<name>`. */
+  id: string
+  /** Canonical PascalCase name. */
   name: string
+  /** Tag emitted on insertion, already cased for its library. */
+  tag: string
   label: string
   category: string
-  source: string
+  library: { id: string; label: string }
+  /** `null` when the component is auto-imported or globally registered. */
+  import: DesignerComponentImport | null
   defaultContent?: string
+  /** False until props, events, and slots have been loaded on demand. */
+  metaLoaded: boolean
+  metaError?: string
   props: DesignerPropMetadata[]
   events: Array<{ name: string; description: string }>
   slots: Array<{ name: string; description: string }>
@@ -183,8 +202,8 @@ export type DesignerSourceOperation =
   | {
       type: 'insert-component'
       parentId: string
-      name: string
-      importSource: string
+      tag: string
+      import?: { from: string; imported: string; local: string }
       defaultContent?: string
       position?: 'inside' | 'after'
     }
@@ -227,6 +246,20 @@ function isStringRecord(value: unknown): value is Record<string, string | number
   )
 }
 
+const pascalTag = /^[A-Z][A-Za-z0-9]*$/
+const kebabTag = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/
+const identifier = /^[A-Za-z_$][A-Za-z0-9_$]*$/
+
+export function isComponentTag(value: unknown): value is string {
+  return typeof value === 'string' && (pascalTag.test(value) || kebabTag.test(value))
+}
+
+function isComponentImport(value: unknown): boolean {
+  return isRecord(value) && typeof value.from === 'string' && value.from.length > 0
+    && typeof value.imported === 'string' && (value.imported === 'default' || identifier.test(value.imported))
+    && typeof value.local === 'string' && identifier.test(value.local)
+}
+
 export function isDesignerSourceOperation(value: unknown): value is DesignerSourceOperation {
   if (!isRecord(value) || typeof value.type !== 'string') return false
   const string = (key: string) => typeof value[key] === 'string'
@@ -241,7 +274,8 @@ export function isDesignerSourceOperation(value: unknown): value is DesignerSour
         && (value.value === null || ['string', 'number', 'boolean'].includes(typeof value.value))
         && (value.binding === undefined || typeof value.binding === 'boolean')
     case 'insert-component':
-      return string('parentId') && string('name') && string('importSource')
+      return string('parentId') && isComponentTag(value.tag)
+        && (value.import === undefined || isComponentImport(value.import))
         && optionalString('defaultContent') && position(['inside', 'after'])
     case 'insert-native':
       return string('parentId') && string('tag')

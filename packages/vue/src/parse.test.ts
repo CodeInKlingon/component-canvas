@@ -77,8 +77,8 @@ describe('parseDesignerDocument', () => {
     const result = applySourceOperation(source, {
       type: 'insert-component',
       parentId: main.id,
-      name: 'NoticeBadge',
-      importSource: '../components/NoticeBadge.vue',
+      tag: 'NoticeBadge',
+      import: { from: '../components/NoticeBadge.vue', imported: 'default', local: 'NoticeBadge' },
       defaultContent: 'New',
     })
 
@@ -89,17 +89,72 @@ describe('parseDesignerDocument', () => {
     const insertedAgain = applySourceOperation(result, {
       type: 'insert-component',
       parentId: parseDesignerDocument(result).tree[0]!.id,
-      name: 'NoticeBadge',
-      importSource: '../components/NoticeBadge.vue',
+      tag: 'NoticeBadge',
+      import: { from: '../components/NoticeBadge.vue', imported: 'default', local: 'NoticeBadge' },
     })
     expect(insertedAgain.match(/import NoticeBadge/g)).toHaveLength(1)
+  })
+
+  it('inserts kebab-case tags with named and aliased imports', () => {
+    const source = `<script setup lang="ts">\nimport { VCard as Card } from 'vuetify/components'\n</script>\n<template>\n  <main></main>\n</template>`
+    const main = parseDesignerDocument(source).tree[0]!
+    const named = applySourceOperation(source, {
+      type: 'insert-component', parentId: main.id, tag: 'v-btn',
+      import: { from: 'vuetify/components', imported: 'VBtn', local: 'VBtn' },
+    })
+    expect(named).toContain("import { VBtn } from 'vuetify/components'\n</script>")
+    expect(named).toContain('<v-btn>v-btn</v-btn>')
+
+    const aliased = applySourceOperation(named, {
+      type: 'insert-component', parentId: parseDesignerDocument(named).tree[0]!.id, tag: 'Card',
+      import: { from: 'vuetify/components', imported: 'VCard', local: 'Card' },
+    })
+    expect(aliased.match(/import/g)).toHaveLength(2)
+
+    const renamed = applySourceOperation(named, {
+      type: 'insert-component', parentId: parseDesignerDocument(named).tree[0]!.id, tag: 'Chip',
+      import: { from: 'vuetify/components', imported: 'VChip', local: 'Chip' },
+    })
+    expect(renamed).toContain("import { VChip as Chip } from 'vuetify/components'")
+  })
+
+  it('reuses imports from a plain script block and rejects conflicting bindings', () => {
+    const source = `<script lang="ts">\nimport Card from './Card.vue'\nexport default { components: { Card } }\n</script>\n<template>\n  <main></main>\n</template>`
+    const main = parseDesignerDocument(source).tree[0]!
+    const reused = applySourceOperation(source, {
+      type: 'insert-component', parentId: main.id, tag: 'Card',
+      import: { from: './Card.vue', imported: 'default', local: 'Card' },
+    })
+    expect(reused).not.toContain('<script setup')
+    expect(() => applySourceOperation(source, {
+      type: 'insert-component', parentId: main.id, tag: 'Card',
+      import: { from: 'ui-lib', imported: 'Card', local: 'Card' },
+    })).toThrow('already declared')
+  })
+
+  it('creates a script setup block matching the existing script language', () => {
+    const source = `<script lang="ts">\nexport default {}\n</script>\n<template>\n  <main></main>\n</template>`
+    const main = parseDesignerDocument(source).tree[0]!
+    const result = applySourceOperation(source, {
+      type: 'insert-component', parentId: main.id, tag: 'Card',
+      import: { from: './Card.vue', imported: 'default', local: 'Card' },
+    })
+    expect(result).toContain(`<script setup lang="ts">\nimport Card from './Card.vue'\n</script>\n\n<template>`)
+    expect(parseDesignerDocument(result).diagnostics).toEqual([])
+  })
+
+  it('inserts auto-imported or globally registered components without an import', () => {
+    const source = `<template>\n  <main></main>\n</template>`
+    const main = parseDesignerDocument(source).tree[0]!
+    const result = applySourceOperation(source, { type: 'insert-component', parentId: main.id, tag: 'notice-tag' })
+    expect(result).toBe(`<template>\n  <main>\n    <notice-tag>notice-tag</notice-tag>\n  </main>\n</template>`)
   })
 
   it('inserts components and native elements after the target', () => {
     const source = `<template>\n  <main>\n    <p>First</p>\n  </main>\n</template>\n`
     const paragraph = parseDesignerDocument(source).tree[0]!.children[0]!
     const withComponent = applySourceOperation(source, {
-      type: 'insert-component', parentId: paragraph.id, position: 'after', name: 'Card', importSource: './Card.vue',
+      type: 'insert-component', parentId: paragraph.id, position: 'after', tag: 'Card', import: { from: './Card.vue', imported: 'default', local: 'Card' },
     })
     expect(withComponent).toContain('    <p>First</p>\n    <Card>Card</Card>')
 
@@ -117,8 +172,7 @@ describe('parseDesignerDocument', () => {
     expect(() => applySourceOperation(source, {
       type: 'insert-component',
       parentId: section.id,
-      name: 'Card',
-      importSource: './Card.vue',
+      tag: 'Card',
     })).toThrow('editable elements')
   })
 
