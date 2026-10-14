@@ -367,7 +367,7 @@ function select(nodeId) {
   }
 }
 document.addEventListener('click', (event) => {
-  if (!selectionEnabled) return
+  if (!selectionEnabled || (event.target instanceof Node && aiButton.contains(event.target))) return
   const target = event.target instanceof Element ? event.target.closest('[data-vue-designer-id]') : null
   const nodeId = target?.getAttribute('data-vue-designer-id')
   event.preventDefault()
