@@ -2,10 +2,10 @@
 import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
 import { ChevronRight, Eye, FileCode2, Folder, Plus, RefreshCw, Search } from '@lucide/vue'
 import type { DesignerDocumentSummary, DesignerRuntimeConfig } from '@vue-designer/shared'
-import NewDesignDialog from './NewDesignDialog.vue'
-import { hostKey, readOnlyKey } from './host'
-import { creatableFolders, formatModified, groupDocuments } from './landing'
-import { routeHash, type DesignerRoute } from './router'
+import NewDesignDialog from '../components/NewDesignDialog.vue'
+import { hostKey, readOnlyKey } from '../services/host'
+import { creatableFolders, formatModified, groupDocuments } from '../lib/landing'
+import { routeHash, type DesignerRoute } from '../services/router'
 
 const emit = defineEmits<{ navigate: [route: DesignerRoute] }>()
 

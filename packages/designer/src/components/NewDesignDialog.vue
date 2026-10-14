@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, ref } from 'vue'
 import type { DesignerDocumentSummary } from '@vue-designer/shared'
-import { hostKey } from './host'
-import { documentNamePattern } from './landing'
+import { hostKey } from '../services/host'
+import { documentNamePattern } from '../lib/landing'
 
 const props = defineProps<{
   folders: string[]

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { provide, ref } from 'vue'
-import EditorScreen from './EditorScreen.vue'
-import LandingScreen from './LandingScreen.vue'
-import { createServerHost, createStaticHost, hostKey, readDesignerMode, readOnlyKey } from './host'
-import { useHashRoute } from './router'
+import EditorScreen from './pages/EditorScreen.vue'
+import LandingScreen from './pages/LandingScreen.vue'
+import { createServerHost, createStaticHost, hostKey, readDesignerMode, readOnlyKey } from './services/host'
+import { useHashRoute } from './services/router'
 
 const host = readDesignerMode(document) === 'readonly' ? createStaticHost() : createServerHost()
 const readOnly = host.mode === 'readonly'

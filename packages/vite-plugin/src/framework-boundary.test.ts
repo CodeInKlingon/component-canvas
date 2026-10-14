@@ -23,8 +23,8 @@ describe('framework package boundary', () => {
       text('../../shared/package.json'),
       text('../../shared/src/index.ts'),
       text('../../designer/src/App.vue'),
-      text('../../designer/src/EditorScreen.vue'),
-      text('../../designer/src/host.ts'),
+      text('../../designer/src/pages/EditorScreen.vue'),
+      text('../../designer/src/services/host.ts'),
     ])
     const designerSource = designerSources.join('\n')
     expect(sharedManifest).not.toContain('@vue/compiler')

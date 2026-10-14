@@ -2,7 +2,7 @@
 import { computed, inject, ref } from 'vue'
 import { ChevronRight, CodeXml, Component, ComponentIcon, Type } from '@lucide/vue'
 import type { DesignerNode } from '@vue-designer/shared'
-import { readOnlyKey } from './host'
+import { readOnlyKey } from '../services/host'
 
 const props = defineProps<{
   node: DesignerNode

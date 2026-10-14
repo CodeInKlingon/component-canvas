@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Editor } from '@pierre/diffs/edit'
 import type { File } from '@pierre/diffs'
-import { offsetAt, positionAt } from './source-position'
+import { offsetAt, positionAt } from '../lib/source-position'
 
 const props = defineProps<{
   source: string
