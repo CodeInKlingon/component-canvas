@@ -64,7 +64,8 @@ import { type DockZone, type ToolId } from '../lib/dock-layout'
 import { readAiModelPreference, resolveAiModelId, resolveAiModelParams, writeAiModelPreference } from '../services/ai-model-preference'
 import { editorContextKey } from '../composables/editor-context'
 import { useWorkspaceLayout } from '../composables/useWorkspaceLayout'
-import { toolDefinition, toolDefinitions, toolIds } from '../components/tools/registry'
+import { toolComponents } from '../components/tools/registry'
+import { availableToolIds, toolDefinition, toolIds } from '../lib/tool-registry'
 
 type SaveState = 'clean' | 'dirty' | 'saving' | 'conflict'
 
@@ -102,10 +103,8 @@ const selectedNodeId = ref<string | null>(null)
 const collapsedIds = ref<ReadonlySet<string>>(new Set())
 const treeCollapseState = new Map<string, Set<string>>()
 const candidateId = ref<string | null>(null)
-const availableToolIds = computed<ReadonlySet<ToolId>>(() => {
-  const availability = { capabilities: framework.value?.capabilities ?? null, readOnly }
-  return new Set(toolDefinitions.filter((tool) => tool.isAvailable(availability)).map((tool) => tool.id))
-})
+const availableToolSet = computed<ReadonlySet<ToolId>>(() =>
+  availableToolIds({ capabilities: framework.value?.capabilities ?? null, readOnly }))
 const {
   workspaceRef: layoutWorkspaceRef,
   style: layoutStyle,
@@ -126,7 +125,7 @@ const {
   addOptions: zoneAddOptions,
   isZoneEmpty,
   reset: resetLayout,
-} = useWorkspaceLayout({ allTools: toolIds, availableTools: () => availableToolIds.value })
+} = useWorkspaceLayout({ allTools: toolIds, availableTools: () => availableToolSet.value })
 const activeStyleSelector = ref('')
 const styleRules = ref<DesignerStyleRule[]>([])
 const computedStyles = ref<Record<string, string>>({})
@@ -1263,7 +1262,7 @@ function zoneTabs(zone: DockZone) {
 
 function activeToolComponent(zone: DockZone) {
   const id = activeTool(zone)
-  return id ? toolDefinition(id)?.component ?? null : null
+  return id ? toolComponents[id] ?? null : null
 }
 
 function openTabMenu(zone: DockZone, payload: { id: string; x: number; y: number }): void {

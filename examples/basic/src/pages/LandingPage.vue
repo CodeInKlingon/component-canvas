@@ -14,7 +14,8 @@ import NoticeBadge from '../components/NoticeBadge.vue'
     </nav>
     <section class="hero">
       <NoticeBadge :subtle="true">Beta</NoticeBadge>
-      <p class="eyebrow">A calmer way to make software</p>
+      <p class="eyebrow">A calmer way to make software
+      </p>
       <h1>Ideas deserve<br><em>room to grow.</em></h1>
       <p class="intro">Shape thoughtful digital products with a toolkit made for clarity, collaboration, and momentum.</p>
       <AppButton tone="lime">Explore the toolkit

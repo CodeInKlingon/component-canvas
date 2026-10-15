@@ -294,7 +294,14 @@ document.addEventListener('wheel', (event) => {
   })
 }, { capture: true, passive: false })
 
-addEventListener('error', (event) => send({ type: 'diagnostic', level: 'error', ...describe(event.error ?? event.message) }))
+addEventListener('error', (event) => {
+  const message = event.message || (event.error && event.error.message) || ''
+  // Chrome reports "ResizeObserver loop completed with undelivered notifications" on window
+  // whenever a large layout change skips a resize notification. It is a benign browser notice,
+  // not an app failure, so it must not raise a diagnostic banner in the editor.
+  if (String(message).startsWith('ResizeObserver loop')) return
+  send({ type: 'diagnostic', level: 'error', ...describe(event.error ?? event.message) })
+})
 addEventListener('unhandledrejection', (event) => send({ type: 'diagnostic', level: 'error', ...describe(event.reason) }))
 for (const level of ['warn', 'error']) {
   const original = console[level]
