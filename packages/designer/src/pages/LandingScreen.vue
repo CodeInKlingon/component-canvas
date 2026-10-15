@@ -1,8 +1,16 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
-import { ChevronRight, Eye, FileCode2, Folder, Plus, RefreshCw, Search } from '@lucide/vue'
+import { FileCode2, Folder, Plus, RefreshCw, Search } from '@lucide/vue'
 import type { DesignerDocumentSummary, DesignerRuntimeConfig } from '@vue-designer/shared'
 import NewDesignDialog from '../components/NewDesignDialog.vue'
+import ReadOnlyBadge from '../components/ReadOnlyBadge.vue'
+import UiBadge from '../components/ui/UiBadge.vue'
+import UiButton from '../components/ui/UiButton.vue'
+import UiDisclosureIcon from '../components/ui/UiDisclosureIcon.vue'
+import UiEmptyState from '../components/ui/UiEmptyState.vue'
+import UiIconTile from '../components/ui/UiIconTile.vue'
+import UiInput from '../components/ui/UiInput.vue'
+import UiNotice from '../components/ui/UiNotice.vue'
 import { hostKey, readOnlyKey } from '../services/host'
 import { creatableFolders, formatModified, groupDocuments } from '../lib/landing'
 import { routeHash, type DesignerRoute } from '../services/router'
@@ -69,44 +77,41 @@ onUnmounted(() => window.clearInterval(clock))
         </p>
       </div>
       <div class="landing-actions">
-        <span v-if="readOnly" class="read-only-badge" title="This build is read-only. Run the dev server to edit designs."><Eye :size="14" />Read-only</span>
-        <label class="landing-search">
-          <Search :size="15" />
-          <input v-model="query" type="search" placeholder="Search designs" aria-label="Search designs">
-        </label>
-        <button class="icon-button" title="Refresh" aria-label="Refresh designs" @click="load"><RefreshCw :size="15" /></button>
-        <button v-if="canCreate" class="primary-button" @click="creating = true"><Plus :size="15" />New design</button>
+        <ReadOnlyBadge v-if="readOnly" />
+        <UiInput v-model="query" class="landing-search" type="search" placeholder="Search designs" aria-label="Search designs">
+          <template #leading><Search :size="15" /></template>
+        </UiInput>
+        <UiButton size="lg" icon-only label="Refresh designs" @click="load"><RefreshCw :size="15" /></UiButton>
+        <UiButton v-if="canCreate" variant="primary" size="lg" @click="creating = true"><template #icon><Plus :size="15" /></template>New design</UiButton>
       </div>
     </header>
 
     <main class="landing-body">
-      <div v-if="loading && !documents.length" class="landing-empty">Scanning project...</div>
-      <div v-else-if="error" class="landing-empty error" role="alert">
-        <strong>Unable to load designs</strong>
-        <span>{{ error }}</span>
-        <button class="icon-button wide" @click="load"><RefreshCw :size="14" />Try again</button>
-      </div>
-      <div v-else-if="!documents.length" class="landing-empty">
-        <strong>No designs yet</strong>
-        <span>
-          No files match <code v-for="pattern in config?.documentPatterns" :key="pattern">{{ pattern }}</code>.
-          Change the <code>documents</code> option of the designer plugin in your Vite config<template v-if="canCreate">, or create the first design</template>.
-        </span>
-        <button v-if="canCreate" class="primary-button" @click="creating = true"><Plus :size="15" />New design</button>
-      </div>
-      <div v-else-if="!folders.length" class="landing-empty">No designs match “{{ query }}”.</div>
-      <section v-for="folder in folders" v-else :key="folder.path" class="landing-folder" :class="{ collapsed: collapsedFolders.has(folder.path) }">
+      <UiEmptyState v-if="loading && !documents.length" variant="boxed">Scanning project...</UiEmptyState>
+      <UiNotice v-else-if="error" class="landing-error" tone="danger" title="Unable to load designs">
+        {{ error }}
+        <template #actions><UiButton @click="load"><template #icon><RefreshCw :size="14" /></template>Try again</UiButton></template>
+      </UiNotice>
+      <UiEmptyState v-else-if="!documents.length" variant="boxed" title="No designs yet">
+        No files match <code v-for="pattern in config?.documentPatterns" :key="pattern">{{ pattern }}</code>.
+        Change the <code>documents</code> option of the designer plugin in your Vite config<template v-if="canCreate">, or create the first design</template>.
+        <template v-if="canCreate" #actions>
+          <UiButton variant="primary" size="lg" @click="creating = true"><template #icon><Plus :size="15" /></template>New design</UiButton>
+        </template>
+      </UiEmptyState>
+      <UiEmptyState v-else-if="!folders.length" variant="boxed">No designs match “{{ query }}”.</UiEmptyState>
+      <section v-for="folder in folders" v-else :key="folder.path" class="landing-folder">
         <button class="landing-folder-header" :aria-expanded="!collapsedFolders.has(folder.path)" @click="toggleFolder(folder.path)">
-          <ChevronRight :size="14" class="landing-chevron" />
+          <UiDisclosureIcon :expanded="!collapsedFolders.has(folder.path)" class="landing-chevron" />
           <Folder :size="15" />
           <span class="landing-folder-path">
             <span v-if="folder.root" class="landing-folder-root">{{ folder.root }}{{ folder.relative ? '/' : '' }}</span>{{ folder.relative || (folder.root ? '' : '(project root)') }}
           </span>
-          <span class="landing-count">{{ folder.documents.length }}</span>
+          <UiBadge class="landing-count">{{ folder.documents.length }}</UiBadge>
         </button>
         <div v-if="!collapsedFolders.has(folder.path)" class="landing-grid">
           <a v-for="document in folder.documents" :key="document.path" class="landing-card" :href="routeHash({ name: 'editor', path: document.path })">
-            <span class="landing-card-icon"><FileCode2 :size="18" /></span>
+            <UiIconTile size="lg" tone="soft"><FileCode2 :size="18" /></UiIconTile>
             <span class="landing-card-text">
               <strong>{{ document.name }}</strong>
               <code>{{ document.path }}</code>

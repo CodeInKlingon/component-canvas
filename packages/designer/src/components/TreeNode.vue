@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
-import { ChevronRight, CodeXml, Component, ComponentIcon, Type } from '@lucide/vue'
 import type { DesignerNode } from '@vue-designer/shared'
 import { readOnlyKey } from '../services/host'
+import NodeKindIcon from './NodeKindIcon.vue'
+import UiBadge from './ui/UiBadge.vue'
+import UiDisclosureIcon from './ui/UiDisclosureIcon.vue'
 
 const props = defineProps<{
   node: DesignerNode
@@ -97,12 +99,11 @@ function handleChildContextMenu(event: MouseEvent, node: DesignerNode): void {
       <button
         v-if="node.children.length"
         class="tree-disclosure"
-        :class="{ expanded: !collapsed }"
         :aria-expanded="!collapsed"
         :aria-label="collapsed ? `Expand ${node.label}` : `Collapse ${node.label}`"
         @click="emit('toggleCollapse', node)"
       >
-        <ChevronRight :size="13" />
+        <UiDisclosureIcon :expanded="!collapsed" :size="13" />
       </button>
       <span v-else class="tree-disclosure tree-disclosure--spacer" aria-hidden="true"></span>
       <button
@@ -118,13 +119,9 @@ function handleChildContextMenu(event: MouseEvent, node: DesignerNode): void {
         @dragleave="handleDragLeave($event, 'inside')"
         @drop="handleDrop($event, 'inside')"
       >
-        <span class="tree-kind">
-          <Component v-if="node.kind === 'component'" :size="16" />
-          <Type v-else-if="node.kind === 'text'" :size="16" />
-          <CodeXml v-else :size="16" />
-        </span>
+        <NodeKindIcon :kind="node.kind" :selected="selectedId === node.id" />
         <span class="tree-label">{{ node.kind === 'text' ? `“${node.label}”` : node.label }}</span>
-        <span v-if="!node.editable" class="lock-mark">Locked</span>
+        <UiBadge v-if="!node.editable" class="lock-mark" tone="warning">Locked</UiBadge>
       </button>
     </div>
     <ul v-if="node.children.length && !collapsed">

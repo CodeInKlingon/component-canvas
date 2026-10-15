@@ -26,6 +26,7 @@ These tickets are ordered by dependency. Each slice must leave the designer in a
 | [17](17-component-sources.md) | Component sources (complete) | Palette components are discovered from inline local globs and component libraries with per-library casing and import modes |
 | [18](18-designer-takeover-and-landing.md) | Designer takeover and landing screen (complete) | The dev server opens the designer, which lists, groups, and creates design files |
 | [19](19-read-only-static-build.md) | Read-only static build (complete) | Production builds publish a browsable, read-only designer |
+| [20](20-ui-primitives.md) | UI primitives (complete) | Repeated designer UI patterns become shared components so screens stay consistent |
 
 ## Working Agreement
 

@@ -1,0 +1,59 @@
+/* Shared look for UiInput, UiSelect, and UiTextarea. */
+@layer ui {
+  .ui-control {
+    width: 100%;
+    min-width: 0;
+    min-height: var(--control-lg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    outline: 0;
+    background: var(--background);
+    color: var(--text);
+    padding: 0 9px;
+    font: 14px/1.4 var(--sans);
+  }
+  .ui-control:focus,
+  .ui-control--affix:focus-within { border-color: var(--selection); box-shadow: var(--focus-glow); }
+  .ui-control[aria-invalid='true'],
+  .ui-control--affix:has([aria-invalid='true']) { border-color: #fca5a5; }
+  .ui-control:disabled,
+  .ui-control--affix:has(:disabled) { background: var(--surface); color: var(--faint); }
+  :is(input, textarea).ui-control:read-only:not(:disabled),
+  .ui-control--affix:has(> input:read-only:not(:disabled)) { background: var(--surface); color: var(--text-secondary); }
+
+  .ui-control--affix { display: flex; align-items: center; gap: 7px; color: var(--faint); }
+  .ui-control--affix:focus-within { color: var(--selection); }
+  .ui-control--affix > .ui-control__input,
+  .ui-control--affix > .ui-control__select { flex: 1; min-width: 0; height: calc(var(--control-lg) - 2px); border: 0; outline: 0; background: transparent; color: var(--text); padding: 0; font: inherit; font-family: var(--sans); }
+  .ui-control--affix > :disabled { color: var(--faint); }
+  .ui-control__select { appearance: none; cursor: pointer; }
+  .ui-control__select:disabled { cursor: default; }
+
+  /* The select covers the whole bordered box so any click inside it opens the picker; affixes are drawn on top and pass clicks through. */
+  .ui-control--select { position: relative; }
+  .ui-control--select > .ui-control__select { position: absolute; inset: 0; height: auto; border-radius: inherit; padding: 0 30px 0 9px; }
+  .ui-control--select:has(> :first-child:not(.ui-control__select)) > .ui-control__select { padding-left: 31px; }
+  .ui-control--select > :not(.ui-control__select) { position: relative; pointer-events: none; }
+  .ui-control--select > .ui-control__chevron { margin-left: auto; }
+
+  /* Customizable select (Chromium 135+): draw the option picker like UiMenu instead of the OS list. */
+  @supports (appearance: base-select) {
+    .ui-control__select,
+    .ui-control__select::picker(select) { appearance: base-select; }
+    .ui-control__select { align-items: center; }
+    .ui-control__select::picker-icon { display: none; }
+    .ui-control__select::picker(select) { margin: 4px 0; padding: 5px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--background); color: var(--text); box-shadow: var(--shadow-menu); }
+    .ui-control__select :deep(option) { min-height: 32px; display: flex; align-items: center; gap: 8px; border-radius: 5px; padding: 0 9px; font-size: 14px; }
+    .ui-control__select :deep(option:hover),
+    .ui-control__select :deep(option:focus-visible) { outline: 0; background: var(--selection-soft); color: var(--selection); }
+    .ui-control__select :deep(option:checked) { font-weight: 600; }
+    .ui-control__select :deep(option::checkmark) { order: 1; margin-left: auto; color: var(--selection); }
+    .ui-control__select :deep(option:disabled) { color: var(--faint); }
+  }
+  .ui-control--affix > .ui-control__chevron { flex: none; color: var(--faint); pointer-events: none; }
+
+  .ui-control.mono,
+  .ui-control--affix > .mono { font-family: var(--mono); }
+
+  textarea.ui-control { min-height: 82px; padding: 8px 9px; resize: vertical; }
+}

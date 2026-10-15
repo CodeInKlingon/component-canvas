@@ -2,9 +2,6 @@
 import { computed, inject, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   ArrowLeft,
-  Braces,
-  Eye,
-  ChevronDown,
   Code2,
   Component,
   FileCode2,
@@ -23,7 +20,6 @@ import {
   Redo2,
   RefreshCw,
   Save,
-  Sparkles,
   Smartphone,
   Tablet,
   Trash2,
@@ -53,6 +49,25 @@ import { hostKey, readOnlyKey } from '../services/host'
 import type { DesignerRoute } from '../services/router'
 import TreeNode from '../components/TreeNode.vue'
 import SourceEditor from '../components/SourceEditor.vue'
+import AiPromptDialog from '../components/AiPromptDialog.vue'
+import InsertPickerDialog from '../components/InsertPickerDialog.vue'
+import NodeContextMenu from '../components/NodeContextMenu.vue'
+import PaletteItem from '../components/PaletteItem.vue'
+import ReadOnlyBadge from '../components/ReadOnlyBadge.vue'
+import SelectionSummary from '../components/SelectionSummary.vue'
+import UiButton from '../components/ui/UiButton.vue'
+import UiButtonGroup from '../components/ui/UiButtonGroup.vue'
+import UiColorInput from '../components/ui/UiColorInput.vue'
+import UiEmptyState from '../components/ui/UiEmptyState.vue'
+import UiField from '../components/ui/UiField.vue'
+import UiInput from '../components/ui/UiInput.vue'
+import UiNotice from '../components/ui/UiNotice.vue'
+import UiPanelHeader from '../components/ui/UiPanelHeader.vue'
+import UiSectionHeading from '../components/ui/UiSectionHeading.vue'
+import UiSegmentedControl, { type UiSegmentOption } from '../components/ui/UiSegmentedControl.vue'
+import UiSelect from '../components/ui/UiSelect.vue'
+import UiTabs from '../components/ui/UiTabs.vue'
+import UiTextarea from '../components/ui/UiTextarea.vue'
 import { SourceHistory } from '../lib/history'
 import { findNode, findNodeAtOffset, findNodeAtPath, findNodePath, findRenderedSelection, reconcileCollapsedTree } from '../lib/selection'
 import { nativeElements, type NativeElementMetadata } from '../lib/native-elements'
@@ -160,6 +175,25 @@ const activeStyleRule = computed<DesignerStyleRule | null>(() =>
     ?? styleRules.value[0]
     ?? null,
 )
+const styleOptions: Record<string, string[]> = {
+  display: ['block', 'flex', 'grid', 'inline-flex', 'none'],
+  'text-align': ['left', 'center', 'right', 'justify'],
+}
+const viewportOptions: UiSegmentOption<ViewportMode>[] = [
+  { value: 'responsive', label: 'Responsive', icon: Maximize2, title: 'Responsive viewport' },
+  { value: 'desktop', label: 'Desktop', icon: Monitor, title: 'Desktop viewport (1440 × 900)' },
+  { value: 'tablet', label: 'Tablet', icon: Tablet, title: 'Tablet viewport (768 × 1024)' },
+  { value: 'mobile', label: 'Mobile', icon: Smartphone, title: 'Mobile viewport (390 × 844)' },
+]
+const sidebarOptions = computed<UiSegmentOption<'layers' | 'components'>[]>(() => [
+  { value: 'layers', label: 'Layers', icon: Layers3 },
+  ...(framework.value?.capabilities.components && !readOnly ? [{ value: 'components' as const, label: 'Components', icon: Component }] : []),
+])
+const inspectorTabs = computed(() => [
+  { value: 'content' as const, label: 'Props' },
+  ...(framework.value?.capabilities.styles ? [{ value: 'style' as const, label: 'Style' }] : []),
+])
+const documentOptions = computed(() => documents.value.map((document) => ({ value: document.path, label: document.name })))
 const styleControls = [
   { group: 'Layout', properties: ['display', 'width', 'height', 'gap'] },
   { group: 'Spacing', properties: ['padding', 'margin'] },
@@ -290,17 +324,8 @@ function canContainChildren(node: DesignerNode | null): boolean {
 
 function openContextMenu(event: MouseEvent, node: DesignerNode): void {
   if (!node.editable) return
-  if (readOnly) {
-    selectNode(node, false)
-    contextMenu.value = { nodeId: node.id, x: Math.min(event.clientX, window.innerWidth - 190), y: Math.min(event.clientY, window.innerHeight - 60) }
-    return
-  }
   selectNode(node, false)
-  contextMenu.value = {
-    nodeId: node.id,
-    x: Math.min(event.clientX, window.innerWidth - 190),
-    y: Math.min(event.clientY, window.innerHeight - 180),
-  }
+  contextMenu.value = { nodeId: node.id, x: event.clientX, y: event.clientY }
 }
 
 function closeContextMenu(): void {
@@ -595,12 +620,6 @@ function selectedAiParams(): DesignerAiModelParameterValue[] {
 
 function closeAiPrompt(): void {
   if (!aiRunning.value) aiPromptOpen.value = false
-}
-
-function submitAiPromptShortcut(event: KeyboardEvent): void {
-  if (!event.ctrlKey && !event.metaKey) return
-  event.preventDefault()
-  void runAiEdit()
 }
 
 function openAiPrompt(): void {
@@ -1170,14 +1189,9 @@ function handleShortcut(event: KeyboardEvent): void {
     spacePressed.value = true
     event.preventDefault()
   }
-  if (event.key === 'Escape' && aiPromptOpen.value) {
-    closeAiPrompt()
-    return
-  }
   if (event.key === 'Escape') {
     escapeDeselecting = true
     closeContextMenu()
-    closeInsertPicker()
     deselectNode()
   }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
@@ -1219,7 +1233,6 @@ onMounted(() => {
   window.addEventListener('keyup', handleKeyUp)
   window.addEventListener('message', handlePreviewMessage)
   window.addEventListener('wheel', continueCanvasWheelOutsideViewport, { capture: true, passive: false })
-  window.addEventListener('pointerdown', closeContextMenu)
   canvasResizeObserver = new ResizeObserver(([entry]) => {
     if (!entry) return
     const { width, height } = entry.contentRect
@@ -1237,7 +1250,6 @@ onUnmounted(() => {
   window.removeEventListener('keyup', handleKeyUp)
   window.removeEventListener('message', handlePreviewMessage)
   window.removeEventListener('wheel', continueCanvasWheelOutsideViewport, { capture: true })
-  window.removeEventListener('pointerdown', closeContextMenu)
   canvasResizeObserver?.disconnect()
   window.clearTimeout(sourcePreviewTimer)
   window.clearTimeout(wheelPanTimer)
@@ -1250,8 +1262,8 @@ onUnmounted(() => {
   <div class="studio">
     <header class="topbar">
       <div class="brand">
-        <button class="back-link" title="All designs" @click="showDesigns"><ArrowLeft :size="15" />Designs</button>
-        <span v-if="readOnly" class="read-only-badge" title="This build is read-only. Run the dev server to edit designs."><Eye :size="14" />Read-only</span>
+        <UiButton variant="ghost" class="back-link" title="All designs" @click="showDesigns"><template #icon><ArrowLeft :size="15" /></template>Designs</UiButton>
+        <ReadOnlyBadge v-if="readOnly" />
       </div>
       <div class="document-title">
         <FileCode2 :size="14" />
@@ -1259,51 +1271,35 @@ onUnmounted(() => {
         <span class="status-dot" :class="saveState" />
       </div>
       <div class="actions">
-        <div class="viewport-switcher" aria-label="Preview viewport">
-          <button :class="{ active: viewportMode === 'responsive' }" title="Responsive viewport" @click="setViewportMode('responsive')">
-            <Maximize2 :size="14" /><span>Responsive</span>
-          </button>
-          <button :class="{ active: viewportMode === 'desktop' }" title="Desktop viewport (1440 × 900)" @click="setViewportMode('desktop')">
-            <Monitor :size="14" /><span>Desktop</span>
-          </button>
-          <button :class="{ active: viewportMode === 'tablet' }" title="Tablet viewport (768 × 1024)" @click="setViewportMode('tablet')">
-            <Tablet :size="14" /><span>Tablet</span>
-          </button>
-          <button :class="{ active: viewportMode === 'mobile' }" title="Mobile viewport (390 × 844)" @click="setViewportMode('mobile')">
-            <Smartphone :size="14" /><span>Mobile</span>
-          </button>
-        </div>
+        <UiSegmentedControl :model-value="viewportMode" class="viewport-switcher" :options="viewportOptions" aria-label="Preview viewport" @update:model-value="setViewportMode" />
         <template v-if="!readOnly">
           <span class="save-state">{{ stateLabel }}</span>
-          <div class="history-actions" aria-label="Document history">
-            <button :disabled="!canUndo" title="Undo (Ctrl+Z)" aria-label="Undo" @click="undo"><Undo2 :size="15" /></button>
-            <button :disabled="!canRedo" title="Redo (Ctrl+Y)" aria-label="Redo" @click="redo"><Redo2 :size="15" /></button>
-          </div>
-          <button class="save-button" :disabled="saveState === 'clean' || saveState === 'saving'" @click="save"><Save :size="15" />Save</button>
+          <UiButtonGroup aria-label="Document history">
+            <UiButton variant="ghost" icon-only :disabled="!canUndo" label="Undo (Ctrl+Z)" aria-label="Undo" @click="undo"><Undo2 :size="15" /></UiButton>
+            <UiButton variant="ghost" icon-only :disabled="!canRedo" label="Redo (Ctrl+Y)" aria-label="Redo" @click="redo"><Redo2 :size="15" /></UiButton>
+          </UiButtonGroup>
+          <UiButton variant="primary" size="lg" :disabled="saveState === 'clean' || saveState === 'saving'" @click="save"><template #icon><Save :size="15" /></template>Save</UiButton>
         </template>
       </div>
     </header>
 
     <main class="workspace" :class="{ 'sidebar-collapsed': !sidebarOpen, 'inspector-collapsed': !inspectorOpen }">
       <aside class="sidebar" :class="{ collapsed: !sidebarOpen }">
-        <div class="panel-heading">
-          <span v-if="sidebarOpen">{{ sidebarView === 'layers' ? 'Layers' : 'Components' }}</span>
-          <div v-if="sidebarOpen" class="panel-heading-actions">
-            <button title="Refresh project" aria-label="Refresh project" @click="loadDocuments"><RefreshCw :size="14" /></button>
-            <button title="Collapse left panel" aria-label="Collapse left panel" @click="sidebarOpen = false"><PanelLeftClose :size="15" /></button>
-          </div>
-          <button v-else title="Expand left panel" aria-label="Expand left panel" @click="sidebarOpen = true"><PanelLeftOpen :size="15" /></button>
-        </div>
+        <UiPanelHeader class="panel-heading" :title="sidebarOpen ? (sidebarView === 'layers' ? 'Layers' : 'Components') : undefined">
+          <template #actions>
+            <template v-if="sidebarOpen">
+              <UiButton variant="ghost" size="sm" icon-only label="Refresh project" @click="loadDocuments"><RefreshCw :size="14" /></UiButton>
+              <UiButton variant="ghost" size="sm" icon-only label="Collapse left panel" @click="sidebarOpen = false"><PanelLeftClose :size="15" /></UiButton>
+            </template>
+            <UiButton v-else variant="ghost" size="sm" icon-only label="Expand left panel" @click="sidebarOpen = true"><PanelLeftOpen :size="15" /></UiButton>
+          </template>
+        </UiPanelHeader>
         <div v-if="sidebarOpen" class="sidebar-content">
           <template v-if="sidebarView === 'layers'">
-            <div class="document-picker">
-              <FileCode2 :size="15" />
-              <select :value="path" aria-label="Active document" @change="switchDocument(($event.target as HTMLSelectElement).value)">
-                <option v-for="document in documents" :key="document.path" :value="document.path">{{ document.name }}</option>
-              </select>
-              <ChevronDown :size="14" />
-            </div>
-            <div v-if="loading" class="empty-state">Scanning project...</div>
+            <UiSelect class="document-picker" :value="path" :options="documentOptions" aria-label="Active document" @change="switchDocument(($event.target as HTMLSelectElement).value)">
+              <template #leading><FileCode2 :size="15" /></template>
+            </UiSelect>
+            <UiEmptyState v-if="loading">Scanning project...</UiEmptyState>
             <ul v-else-if="activeDocument" class="tree-list">
               <TreeNode
                 v-for="node in activeDocument.tree"
@@ -1321,67 +1317,82 @@ onUnmounted(() => {
                 @context-menu="openContextMenu"
               />
             </ul>
-            <div v-else-if="documentMissing" class="empty-state">
+            <UiEmptyState v-else-if="documentMissing">
               <code>{{ path }}</code> is not a design in this project.
-              <button class="back-link" @click="showDesigns"><ArrowLeft :size="14" />All designs</button>
-            </div>
-            <div v-else class="empty-state">Loading design...</div>
-            <div v-if="activeDocument?.diagnostics.length" class="tree-diagnostic">{{ activeDocument.diagnostics[0]?.message }}</div>
+              <template #actions><UiButton variant="ghost" class="back-link" @click="showDesigns"><template #icon><ArrowLeft :size="14" /></template>All designs</UiButton></template>
+            </UiEmptyState>
+            <UiEmptyState v-else>Loading design...</UiEmptyState>
+            <UiNotice v-if="activeDocument?.diagnostics.length" class="panel-notice" tone="danger">{{ activeDocument.diagnostics[0]?.message }}</UiNotice>
           </template>
           <template v-else>
-            <div class="palette-intro">Insert into <strong>{{ selectedNode?.label ?? 'a selected container' }}</strong></div>
-            <input v-if="components.length" v-model="componentQuery" class="palette-search" type="search" placeholder="Search components" aria-label="Search components">
+            <UiNotice class="panel-notice">Insert into <strong>{{ selectedNode?.label ?? 'a selected container' }}</strong></UiNotice>
+            <UiInput v-if="components.length" v-model="componentQuery" class="palette-search" type="search" placeholder="Search components" aria-label="Search components" />
             <template v-for="group in componentGroups" :key="group.id">
-              <div class="layers-heading">{{ group.label }}</div>
-              <div class="component-palette">
-                <button v-for="component in group.components" :key="component.id" :disabled="!canContainChildren(selectedNode)" :title="selectedNode ? `Insert <${component.tag}> into ${selectedNode.label}` : 'Select a container first'" draggable="true" @dragstart="startComponentDrag($event, component)" @dragend="endTreeDrag" @click="insertComponent(component)">
-                  <span class="component-glyph"><Component :size="14" /></span>
-                  <span><strong>{{ component.label }}</strong><small>{{ component.category }}</small></span>
-                  <Plus :size="13" />
-                </button>
+              <UiSectionHeading class="palette-heading">{{ group.label }}</UiSectionHeading>
+              <div class="palette-list">
+                <PaletteItem
+                  v-for="component in group.components"
+                  :key="component.id"
+                  :label="component.label"
+                  :category="component.category"
+                  kind="component"
+                  :disabled="!canContainChildren(selectedNode)"
+                  :title="selectedNode ? `Insert <${component.tag}> into ${selectedNode.label}` : 'Select a container first'"
+                  draggable="true"
+                  @dragstart="startComponentDrag($event, component)"
+                  @dragend="endTreeDrag"
+                  @click="insertComponent(component)"
+                />
               </div>
             </template>
-            <div v-if="components.length && !componentGroups.length" class="empty-state">No components match “{{ componentQuery }}”.</div>
-            <div class="layers-heading">Native elements</div>
-            <div class="component-palette native-palette">
-              <button v-for="element in nativeElements" :key="element.tag" :disabled="!canContainChildren(selectedNode)" :title="selectedNode ? `Insert into ${selectedNode.label}` : 'Select a container first'" draggable="true" @dragstart="startNativeDrag($event, element)" @dragend="endTreeDrag" @click="insertNative(element)">
-                <span class="component-glyph"><Braces :size="14" /></span>
-                <span><strong>{{ element.label }}</strong><small>{{ element.category }}</small></span>
-                <Plus :size="13" />
-              </button>
+            <UiEmptyState v-if="components.length && !componentGroups.length">No components match “{{ componentQuery }}”.</UiEmptyState>
+            <UiSectionHeading class="palette-heading">Native elements</UiSectionHeading>
+            <div class="palette-list">
+              <PaletteItem
+                v-for="element in nativeElements"
+                :key="element.tag"
+                :label="element.label"
+                :category="element.category"
+                kind="native"
+                :disabled="!canContainChildren(selectedNode)"
+                :title="selectedNode ? `Insert into ${selectedNode.label}` : 'Select a container first'"
+                draggable="true"
+                @dragstart="startNativeDrag($event, element)"
+                @dragend="endTreeDrag"
+                @click="insertNative(element)"
+              />
             </div>
           </template>
         </div>
-        <div v-if="sidebarOpen" class="sidebar-switcher" aria-label="Sidebar view">
-          <button :class="{ active: sidebarView === 'layers' }" @click="sidebarView = 'layers'"><Layers3 :size="15" />Layers</button>
-          <button v-if="framework?.capabilities.components && !readOnly" :class="{ active: sidebarView === 'components' }" @click="sidebarView = 'components'"><Component :size="15" />Components</button>
-        </div>
+        <UiSegmentedControl v-if="sidebarOpen" v-model="sidebarView" class="sidebar-switcher" appearance="pills" size="sm" :options="sidebarOptions" aria-label="Sidebar view" />
       </aside>
 
       <div class="center-workspace" :class="{ 'source-collapsed': !sourceOpen }">
         <section class="canvas-panel">
-          <div class="canvas-label">
-            <span>Canvas · {{ viewportLabel }}</span>
-            <div class="canvas-zoom" aria-label="Canvas zoom">
-              <button :disabled="viewportMode === 'responsive'" title="Zoom out" aria-label="Zoom out" @click="setCanvasZoom(canvasZoom / 1.2)"><Minus :size="13" /></button>
-              <button :disabled="viewportMode === 'responsive'" title="Reset zoom to 100%" @click="setCanvasZoom(1)">{{ zoomLabel }}</button>
-              <button :disabled="viewportMode === 'responsive'" title="Zoom in" aria-label="Zoom in" @click="setCanvasZoom(canvasZoom * 1.2)"><Plus :size="13" /></button>
-              <button :disabled="viewportMode === 'responsive'" title="Fit viewport" aria-label="Fit viewport" @click="fitCanvas"><Maximize2 :size="13" /></button>
-            </div>
-            <button
-              class="canvas-scroll-toggle"
-              :class="{ active: canvasOwnsInput }"
-              :disabled="viewportMode === 'responsive'"
-              :aria-pressed="canvasOwnsInput"
-              :title="viewportMode === 'responsive'
-                ? 'Input routing is unavailable in responsive view'
-                : canvasOwnsInput ? 'Canvas receives input; click selects and drag pans' : 'Preview receives input'"
-              @click="toggleCanvasInputMode"
-            >
-              <MousePointer2 :size="13" />
-              {{ canvasOwnsInput ? 'Canvas' : 'Preview' }}
-            </button>
-          </div>
+          <UiPanelHeader variant="caption" :title="`Canvas · ${viewportLabel}`">
+            <template #actions>
+              <UiButtonGroup aria-label="Canvas zoom">
+                <UiButton variant="ghost" size="xs" icon-only :disabled="viewportMode === 'responsive'" label="Zoom out" @click="setCanvasZoom(canvasZoom / 1.2)"><Minus :size="13" /></UiButton>
+                <UiButton variant="ghost" size="xs" mono :disabled="viewportMode === 'responsive'" title="Reset zoom to 100%" @click="setCanvasZoom(1)">{{ zoomLabel }}</UiButton>
+                <UiButton variant="ghost" size="xs" icon-only :disabled="viewportMode === 'responsive'" label="Zoom in" @click="setCanvasZoom(canvasZoom * 1.2)"><Plus :size="13" /></UiButton>
+                <UiButton variant="ghost" size="xs" icon-only :disabled="viewportMode === 'responsive'" label="Fit viewport" @click="fitCanvas"><Maximize2 :size="13" /></UiButton>
+              </UiButtonGroup>
+              <UiButton
+                class="canvas-input-toggle"
+                size="xs"
+                :active="canvasOwnsInput && viewportMode !== 'responsive'"
+                :disabled="viewportMode === 'responsive'"
+                :aria-pressed="canvasOwnsInput"
+                :title="viewportMode === 'responsive'
+                  ? 'Input routing is unavailable in responsive view'
+                  : canvasOwnsInput ? 'Canvas receives input; click selects and drag pans' : 'Preview receives input'"
+                @click="toggleCanvasInputMode"
+              >
+                <template #icon><MousePointer2 :size="13" /></template>
+                {{ canvasOwnsInput ? 'Canvas' : 'Preview' }}
+              </UiButton>
+            </template>
+          </UiPanelHeader>
           <div
             ref="canvasViewport"
             class="canvas-viewport"
@@ -1395,7 +1406,7 @@ onUnmounted(() => {
             <div class="canvas-scene" :style="canvasSceneStyle">
               <div class="preview-frame">
                 <iframe v-if="previewUrl" ref="previewFrame" :key="previewUrl" :src="previewUrl" :sandbox="previewSandbox" :title="`${framework?.documentLabel ?? 'Document'} preview`" @load="handlePreviewLoad" />
-                <div v-else class="preview-empty">Select a document to begin.</div>
+                <UiEmptyState v-else variant="centered">Select a document to begin.</UiEmptyState>
               </div>
             </div>
             <div v-if="spacePressed && viewportMode !== 'responsive'" class="canvas-pan-capture" />
@@ -1403,13 +1414,15 @@ onUnmounted(() => {
           </div>
         </section>
         <section class="source-panel">
-          <header class="source-panel-header">
-            <span><Code2 :size="14" />Source</span>
-            <code>{{ activeDocument?.name ?? 'No document' }}</code>
-            <button :title="sourceOpen ? 'Collapse source' : 'Open source'" :aria-label="sourceOpen ? 'Collapse source' : 'Open source'" @click="sourceOpen = !sourceOpen">
-              <PanelBottomClose v-if="sourceOpen" :size="15" /><PanelBottomOpen v-else :size="15" />
-            </button>
-          </header>
+          <UiPanelHeader>
+            <template #title><Code2 :size="14" />Source</template>
+            <code class="source-panel-name">{{ activeDocument?.name ?? 'No document' }}</code>
+            <template #actions>
+              <UiButton variant="ghost" size="sm" icon-only :label="sourceOpen ? 'Collapse source' : 'Open source'" @click="sourceOpen = !sourceOpen">
+                <PanelBottomClose v-if="sourceOpen" :size="15" /><PanelBottomOpen v-else :size="15" />
+              </UiButton>
+            </template>
+          </UiPanelHeader>
           <SourceEditor
             v-if="framework"
             v-show="sourceOpen"
@@ -1428,39 +1441,37 @@ onUnmounted(() => {
       </div>
 
       <aside class="inspector-panel" :class="{ collapsed: !inspectorOpen }">
-        <div class="inspector-tabs">
-          <button v-if="inspectorOpen" :class="{ active: inspectorView === 'content' }" @click="inspectorView = 'content'">Props</button>
-          <button v-if="inspectorOpen && framework?.capabilities.styles" :class="{ active: inspectorView === 'style' }" @click="inspectorView = 'style'">Style</button>
-          <button class="panel-collapse-button" :title="inspectorOpen ? 'Collapse right panel' : 'Expand right panel'" :aria-label="inspectorOpen ? 'Collapse right panel' : 'Expand right panel'" @click="inspectorOpen = !inspectorOpen">
-            <PanelRightClose v-if="inspectorOpen" :size="15" /><PanelRightOpen v-else :size="15" />
-          </button>
-        </div>
+        <UiTabs v-model="inspectorView" class="inspector-tabs" :tabs="inspectorOpen ? inspectorTabs : []">
+          <template #trailing>
+            <UiButton variant="ghost" size="sm" icon-only :label="inspectorOpen ? 'Collapse right panel' : 'Expand right panel'" @click="inspectorOpen = !inspectorOpen">
+              <PanelRightClose v-if="inspectorOpen" :size="15" /><PanelRightOpen v-else :size="15" />
+            </UiButton>
+          </template>
+        </UiTabs>
 
         <div v-if="inspectorOpen && inspectorView === 'content'" class="inspector-content">
-          <div v-if="!selectedNode" class="inspector-empty">
-            <strong>Select a layer</strong>
-            <span>Text and attributes for the selected element will appear here.</span>
-          </div>
+          <UiEmptyState v-if="!selectedNode" title="Select a layer">Text and attributes for the selected element will appear here.</UiEmptyState>
           <template v-else>
-            <div class="selection-summary">
-              <span class="tree-kind">{{ selectedNode.kind === 'component' ? 'C' : selectedNode.kind === 'text' ? 'T' : 'E' }}</span>
-              <div><strong>{{ selectedNode.label }}</strong><small>{{ selectedNode.kind }}</small></div>
-              <div v-if="!readOnly" class="selection-actions">
-                <button :disabled="!selectedNode.editable" title="Duplicate layer" aria-label="Duplicate layer" @click="duplicateSelectedNode"><Plus :size="14" /></button>
-                <button :disabled="!selectedNode.editable" title="Delete layer" aria-label="Delete layer" @click="removeSelectedNode"><Trash2 :size="14" /></button>
-              </div>
-            </div>
+            <SelectionSummary :node="selectedNode" :subtitle="selectedNode.kind">
+              <template v-if="!readOnly" #actions>
+                <UiButton variant="ghost" size="sm" icon-only :disabled="!selectedNode.editable" label="Duplicate layer" @click="duplicateSelectedNode"><Plus :size="14" /></UiButton>
+                <UiButton variant="ghost" size="sm" icon-only danger :disabled="!selectedNode.editable" label="Delete layer" @click="removeSelectedNode"><Trash2 :size="14" /></UiButton>
+              </template>
+            </SelectionSummary>
             <section v-if="selectedNode.kind === 'text'" class="inspector-section">
-              <label for="selected-text">Text content</label>
-              <textarea id="selected-text" :value="selectedNode.value" :readonly="inspectorLocked" @input="updateSelectedText" />
+              <UiField label="Text content">
+                <UiTextarea :value="selectedNode.value" mono :readonly="inspectorLocked" @input="updateSelectedText" />
+              </UiField>
             </section>
-            <section v-if="selectedMetadataProps.length" class="inspector-section props-section">
-              <div class="section-title">{{ selectedComponent ? 'Props' : 'Attributes' }}</div>
-              <label v-for="prop in selectedMetadataProps" :key="prop.name" :title="prop.description || prop.type">
-                <span>
-                  {{ prop.name }}
-                  <small>{{ prop.required ? 'Required' : prop.type }}</small>
-                </span>
+            <section v-if="selectedMetadataProps.length" class="inspector-section">
+              <UiSectionHeading variant="title">{{ selectedComponent ? 'Props' : 'Attributes' }}</UiSectionHeading>
+              <UiField
+                v-for="prop in selectedMetadataProps"
+                :key="prop.name"
+                :label="prop.name"
+                :hint="prop.required ? 'Required' : prop.type"
+                :title="prop.description || prop.type"
+              >
                 <div class="prop-control">
                   <input
                     v-if="prop.control === 'checkbox'"
@@ -1469,205 +1480,160 @@ onUnmounted(() => {
                     :disabled="inspectorLocked || propIsExpression(prop)"
                     @change="updateComponentProp(prop, $event)"
                   />
-                  <select
+                  <UiSelect
                     v-else-if="prop.control === 'select'"
                     :value="propValue(prop)"
+                    :options="prop.options ?? []"
+                    :empty-option="prop.required ? undefined : 'Default'"
+                    mono
                     :disabled="inspectorLocked || propIsExpression(prop)"
                     @change="updateComponentProp(prop, $event)"
-                  >
-                    <option v-if="!prop.required" value="">Default</option>
-                    <option v-for="option in prop.options" :key="option" :value="option">{{ option }}</option>
-                  </select>
-                  <input
-                    v-else
-                    :type="prop.control === 'number' ? 'number' : prop.control === 'color' ? 'color' : 'text'"
+                  />
+                  <UiColorInput
+                    v-else-if="prop.control === 'color'"
                     :value="propValue(prop)"
+                    :label="prop.name"
                     :readonly="inspectorLocked"
                     :disabled="propIsExpression(prop)"
                     @change="updateComponentProp(prop, $event)"
                   />
-                  <button v-if="selectedAttribute(prop.name) && !prop.required && !inspectorLocked" title="Use default value" @click="clearComponentProp(prop)">Reset</button>
+                  <UiInput
+                    v-else
+                    :type="prop.control === 'number' ? 'number' : 'text'"
+                    :value="propValue(prop)"
+                    mono
+                    :readonly="inspectorLocked"
+                    :disabled="propIsExpression(prop)"
+                    @change="updateComponentProp(prop, $event)"
+                  />
+                  <UiButton v-if="selectedAttribute(prop.name) && !prop.required && !inspectorLocked" variant="ghost" size="sm" title="Use default value" @click="clearComponentProp(prop)">Reset</UiButton>
                 </div>
-                <small v-if="propIsExpression(prop)" class="expression-note">Expression props are source-only.</small>
-              </label>
+                <template v-if="propIsExpression(prop)" #note><small class="expression-note">Expression props are source-only.</small></template>
+              </UiField>
             </section>
             <section v-if="selectedNode.attributes.some((attribute) => !isMetadataProp(attribute.name))" class="inspector-section">
-              <div class="section-title">Attributes</div>
-              <label v-for="attribute in selectedNode.attributes.filter((item) => !isMetadataProp(item.name))" :key="attribute.name">
-                <span>{{ attribute.name }}<small v-if="!attribute.editable">Expression</small></span>
-                <input
+              <UiSectionHeading variant="title">Attributes</UiSectionHeading>
+              <UiField
+                v-for="attribute in selectedNode.attributes.filter((item) => !isMetadataProp(item.name))"
+                :key="attribute.name"
+                :label="attribute.name"
+                :hint="attribute.editable ? undefined : 'Expression'"
+              >
+                <UiInput
                   :value="attribute.value"
+                  mono
                   :readonly="inspectorLocked"
                   :disabled="!attribute.editable"
                   @change="updateSelectedAttribute(attribute.name, $event)"
                 />
-              </label>
+              </UiField>
             </section>
-            <div v-if="selectedNode.kind !== 'text' && !selectedNode.attributes.length && !selectedMetadataProps.length" class="inspector-empty compact">No attributes on this layer.</div>
-            <div v-if="!selectedNode.editable" class="locked-notice">{{ selectedNode.lockedReason }}</div>
-            <div v-else-if="readOnly" class="read-only-notice">Read-only build. Run the dev server to edit this design.</div>
+            <UiEmptyState v-if="selectedNode.kind !== 'text' && !selectedNode.attributes.length && !selectedMetadataProps.length" compact>No attributes on this layer.</UiEmptyState>
+            <UiNotice v-if="!selectedNode.editable" class="panel-notice" tone="warning">{{ selectedNode.lockedReason }}</UiNotice>
+            <UiNotice v-else-if="readOnly" class="panel-notice">Read-only build. Run the dev server to edit this design.</UiNotice>
           </template>
         </div>
 
-        <div v-else-if="inspectorOpen && inspectorView === 'style' && framework?.capabilities.styles" class="inspector-content style-inspector">
-          <div v-if="!selectedNode || selectedNode.kind === 'text'" class="inspector-empty">
-            <strong>Select an element</strong>
-            <span>Editable local CSS rules will appear here.</span>
-          </div>
+        <div v-else-if="inspectorOpen && inspectorView === 'style' && framework?.capabilities.styles" class="inspector-content">
+          <UiEmptyState v-if="!selectedNode || selectedNode.kind === 'text'" title="Select an element">Editable local CSS rules will appear here.</UiEmptyState>
           <template v-else>
-            <div class="selection-summary">
-              <span class="tree-kind">{{ selectedNode.kind === 'component' ? 'C' : 'E' }}</span>
-              <div><strong>{{ selectedNode.label }}</strong><small>Styles</small></div>
-            </div>
-            <div class="style-rule-picker">
-              <label>Local rule</label>
-              <select
-                v-if="styleRules.length"
-                :value="activeStyleRule?.selector"
-                @change="activeStyleSelector = ($event.target as HTMLSelectElement).value"
-              >
-                <option v-for="rule in styleRules" :key="rule.selector" :value="rule.selector">{{ rule.selector }}</option>
-              </select>
-              <code v-else>{{ styleSelector() }} (new)</code>
-            </div>
+            <SelectionSummary :node="selectedNode" subtitle="Styles" />
+            <section class="inspector-section">
+              <UiField v-if="styleRules.length" label="Local rule">
+                <UiSelect
+                  :value="activeStyleRule?.selector"
+                  :options="styleRules.map((rule) => rule.selector)"
+                  mono
+                  @change="activeStyleSelector = ($event.target as HTMLSelectElement).value"
+                />
+              </UiField>
+              <UiField v-else as="div" label="Local rule">
+                <code class="style-rule-new">{{ styleSelector() }} (new)</code>
+              </UiField>
+            </section>
             <section v-for="group in styleControls" :key="group.group" class="inspector-section style-section">
-              <div class="section-title">{{ group.group }}</div>
-              <label v-for="property in group.properties" :key="property">
-                <span>{{ property }}</span>
-                <select v-if="property === 'display'" :value="styleValue(property)" :disabled="inspectorLocked" @change="updateStyle(property, $event)">
-                  <option value="">Unset</option>
-                  <option v-for="value in ['block', 'flex', 'grid', 'inline-flex', 'none']" :key="value" :value="value">{{ value }}</option>
-                </select>
-                <select v-else-if="property === 'text-align'" :value="styleValue(property)" :disabled="inspectorLocked" @change="updateStyle(property, $event)">
-                  <option value="">Unset</option>
-                  <option v-for="value in ['left', 'center', 'right', 'justify']" :key="value" :value="value">{{ value }}</option>
-                </select>
-                <div v-else-if="property === 'color' || property === 'background-color'" class="color-control">
-                  <input type="color" :disabled="inspectorLocked" :value="styleValue(property) || '#000000'" @change="updateStyle(property, $event)" />
-                  <input :readonly="inspectorLocked" :value="styleValue(property)" placeholder="Unset" @change="updateStyle(property, $event)" />
-                </div>
-                <input v-else :readonly="inspectorLocked" :value="styleValue(property)" placeholder="Unset" @change="updateStyle(property, $event)" />
-              </label>
+              <UiSectionHeading variant="title">{{ group.group }}</UiSectionHeading>
+              <UiField v-for="property in group.properties" :key="property" :label="property" layout="inline">
+                <UiSelect
+                  v-if="styleOptions[property]"
+                  :value="styleValue(property)"
+                  :options="styleOptions[property]"
+                  empty-option="Unset"
+                  mono
+                  :disabled="inspectorLocked"
+                  @change="updateStyle(property, $event)"
+                />
+                <UiColorInput
+                  v-else-if="property === 'color' || property === 'background-color'"
+                  :value="styleValue(property)"
+                  :label="property"
+                  :readonly="inspectorLocked"
+                  placeholder="Unset"
+                  @change="updateStyle(property, $event)"
+                />
+                <UiInput v-else :value="styleValue(property)" mono :readonly="inspectorLocked" placeholder="Unset" @change="updateStyle(property, $event)" />
+              </UiField>
             </section>
             <section v-if="Object.keys(computedStyles).length" class="inspector-section computed-section">
-              <div class="section-title">Computed</div>
+              <UiSectionHeading variant="title">Computed</UiSectionHeading>
               <div v-for="(value, property) in computedStyles" :key="property" class="computed-row">
                 <span>{{ property }}</span><code>{{ value || 'initial' }}</code>
               </div>
             </section>
           </template>
         </div>
-
       </aside>
     </main>
 
-    <div v-if="error || previewDiagnostic" class="diagnostic">
+    <UiNotice v-if="error || previewDiagnostic" class="diagnostic" tone="danger" inline>
       <span>{{ error || previewDiagnostic?.message }}</span>
       <details v-if="previewDiagnostic?.stack">
         <summary>Details</summary>
         <pre>{{ previewDiagnostic.stack }}</pre>
       </details>
-      <button v-if="saveState === 'conflict'" @click="reload">Reload from disk</button>
-      <button v-if="saveState === 'conflict' && externalRevision" @click="keepLocalChanges">Overwrite disk</button>
-      <button v-if="previewDiagnostic" @click="reloadPreview">Reload preview</button>
-      <button @click="error = ''; previewDiagnostic = null">Dismiss</button>
-    </div>
-    <div
+      <template #actions>
+        <UiButton v-if="saveState === 'conflict'" size="sm" @click="reload">Reload from disk</UiButton>
+        <UiButton v-if="saveState === 'conflict' && externalRevision" size="sm" @click="keepLocalChanges">Overwrite disk</UiButton>
+        <UiButton v-if="previewDiagnostic" size="sm" @click="reloadPreview">Reload preview</UiButton>
+        <UiButton size="sm" @click="error = ''; previewDiagnostic = null">Dismiss</UiButton>
+      </template>
+    </UiNotice>
+    <NodeContextMenu
       v-if="contextMenu"
-      class="node-context-menu"
-      role="menu"
-      :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
-      @pointerdown.stop
-    >
-            <button v-if="readOnly" role="menuitem" @click="copyContextNode">Copy</button>
-            <template v-else>
-            <button role="menuitem" :disabled="!canContainChildren(selectedNode)" @click="openInsertPicker('inside')">Insert inside...</button>
-            <button role="menuitem" @click="openInsertPicker('after')">Insert after...</button>
-            <hr />
-            <button role="menuitem" @click="copyContextNode">Copy</button>
-            <button role="menuitem" @click="duplicateContextNode">Duplicate</button>
-            <hr />
-            <button role="menuitem" :disabled="!canContainChildren(selectedNode)" @click="pasteContextNode('inside')">Paste inside</button>
-            <button role="menuitem" @click="pasteContextNode('after')">Paste after</button>
-            <hr />
-            <button class="danger" role="menuitem" @click="removeContextNode">Delete</button>
-            </template>
-          </div>
-    <div v-if="aiPromptOpen && selectedNode && !readOnly" class="ai-prompt-backdrop" @pointerdown.self="closeAiPrompt">
-      <form class="ai-prompt" role="dialog" aria-modal="true" aria-labelledby="ai-prompt-title" @submit.prevent="runAiEdit">
-        <header>
-          <div>
-            <strong id="ai-prompt-title"><Sparkles :size="15" />Edit {{ selectedNode.label }} with AI</strong>
-            <small>Cursor proposes a source change you can preview, undo, or save</small>
-          </div>
-          <button type="button" aria-label="Close AI prompt" :disabled="aiRunning" @click="closeAiPrompt">×</button>
-        </header>
-        <div class="ai-prompt-body">
-          <textarea
-            v-model="aiPrompt"
-            autofocus
-            :disabled="aiRunning"
-            placeholder="Describe the change..."
-            @keydown.enter="submitAiPromptShortcut"
-          />
-        </div>
-        <footer>
-          <div class="ai-prompt-settings">
-            <label>
-              <span>Model</span>
-              <select
-                v-model="aiModel"
-                :title="aiModelsState === 'error' ? aiModelsError : selectedAiModel?.description ?? 'Cursor model'"
-                :disabled="aiRunning || aiModelsState !== 'ready'"
-              >
-                <option v-if="aiModelsState === 'loading'" :value="aiModel">Loading models...</option>
-                <option v-else-if="aiModelsState === 'error'" :value="aiModel">Models unavailable</option>
-                <option v-for="model in aiModels" :key="model.id" :value="model.id">{{ model.displayName }}</option>
-              </select>
-            </label>
-            <label v-for="parameter in selectedAiModel?.parameters ?? []" :key="parameter.id">
-              <span>{{ parameter.displayName ?? parameter.id }}</span>
-              <select v-model="aiParams[parameter.id]" :disabled="aiRunning">
-                <option value="">Default</option>
-                <option v-for="option in parameter.values" :key="option.value" :value="option.value">{{ option.displayName ?? option.value }}</option>
-              </select>
-            </label>
-          </div>
-          <div class="ai-prompt-actions">
-            <button type="button" :disabled="aiRunning" @click="closeAiPrompt">Cancel</button>
-            <button type="submit" :disabled="!aiPrompt.trim() || aiRunning"><Sparkles :size="13" />{{ aiRunning ? 'Working...' : 'Apply' }}</button>
-          </div>
-        </footer>
-      </form>
-    </div>
-    <div v-if="insertPicker && !readOnly" class="insert-picker-backdrop" @pointerdown.self="closeInsertPicker">
-      <section class="insert-picker" role="dialog" aria-modal="true" aria-labelledby="insert-picker-title">
-        <header>
-          <div><strong id="insert-picker-title">Insert {{ insertPicker.position }}</strong><small>Choose a project component or native element</small></div>
-          <button aria-label="Close insert picker" @click="closeInsertPicker">×</button>
-        </header>
-        <div class="insert-picker-content">
-          <section>
-            <input v-if="components.length" v-model="componentQuery" class="palette-search" type="search" placeholder="Search components" aria-label="Search components">
-            <template v-for="group in componentGroups" :key="group.id">
-              <h3>{{ group.label }}</h3>
-              <div class="component-palette">
-                <button v-for="component in group.components" :key="component.id" @click="pickComponent(component)">
-                  <span class="component-glyph"><Component :size="14" /></span><span><strong>{{ component.label }}</strong><small>{{ component.category }}</small></span><Plus :size="13" />
-                </button>
-              </div>
-            </template>
-          </section>
-          <section>
-            <h3>Native elements</h3>
-            <div class="component-palette native-palette">
-              <button v-for="element in nativeElements" :key="element.tag" @click="pickNative(element)">
-                <span class="component-glyph"><Braces :size="14" /></span><span><strong>{{ element.label }}</strong><small>{{ element.category }}</small></span><Plus :size="13" />
-              </button>
-            </div>
-          </section>
-        </div>
-      </section>
-    </div>
+      :x="contextMenu.x"
+      :y="contextMenu.y"
+      :read-only="readOnly"
+      :can-insert-inside="canContainChildren(selectedNode)"
+      @close="closeContextMenu"
+      @insert="openInsertPicker"
+      @copy="copyContextNode"
+      @duplicate="duplicateContextNode"
+      @paste="pasteContextNode"
+      @remove="removeContextNode"
+    />
+    <AiPromptDialog
+      v-if="aiPromptOpen && selectedNode && !readOnly"
+      v-model:prompt="aiPrompt"
+      v-model:model="aiModel"
+      v-model:params="aiParams"
+      :node-label="selectedNode.label"
+      :running="aiRunning"
+      :models="aiModels"
+      :models-state="aiModelsState"
+      :models-error="aiModelsError"
+      @close="closeAiPrompt"
+      @submit="runAiEdit"
+    />
+    <InsertPickerDialog
+      v-if="insertPicker && !readOnly"
+      v-model:query="componentQuery"
+      :position="insertPicker.position"
+      :searchable="components.length > 0"
+      :groups="componentGroups"
+      :natives="nativeElements"
+      @close="closeInsertPicker"
+      @pick-component="pickComponent"
+      @pick-native="pickNative"
+    />
   </div>
 </template>
