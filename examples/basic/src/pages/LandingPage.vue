@@ -6,12 +6,12 @@ import NoticeBadge from '../components/NoticeBadge.vue'
 
 <template>
   <main class="page">
+
     <nav>
       <strong>Fieldnote</strong>
       <span>Product&nbsp;&nbsp;&nbsp; Stories&nbsp;&nbsp;&nbsp; About</span>
       <AppButton tone="dark">Start a project</AppButton>
     </nav>
-
     <section class="hero">
       <NoticeBadge :subtle="true">Beta</NoticeBadge>
       <p class="eyebrow">A calmer way to make software</p>
@@ -22,17 +22,31 @@ import NoticeBadge from '../components/NoticeBadge.vue'
       
     </section>
 
-    <section class="features">
+    <section class="designer-node-22">
+      <section class="features">
       <FeatureCard number="01" title="Start with intent">Turn rough thinking into a shared direction before the details take over.
       </FeatureCard>
       <FeatureCard number="02" title="Build in context">Compose real components where content, behavior, and design stay connected.</FeatureCard>
       <FeatureCard number="03" title="Keep the source">Every decision remains readable Vue code that belongs to your project.</FeatureCard>
     </section>
-
-    <section class="features">
+      <section class="features">
+      <FeatureCard number="01" title="Start with intent">Turn rough thinking into a shared direction before the details take over.
+      </FeatureCard>
+      <FeatureCard number="02" title="Build in context">Compose real components where content, behavior, and design stay connected.</FeatureCard>
+      <FeatureCard number="03" title="Keep the source">Every decision remains readable Vue code that belongs to your project.</FeatureCard>
+    </section>
+      <section class="features">
+      <FeatureCard number="01" title="Start with intent">Turn rough thinking into a shared direction before the details take over.
+      </FeatureCard>
+      <FeatureCard number="02" title="Build in context">Compose real components where content, behavior, and design stay connected.</FeatureCard>
+      <FeatureCard number="03" title="Keep the source">Every decision remains readable Vue code that belongs to your project.</FeatureCard>
+    </section>
+      <section class="features">
       <FeatureCard v-for="(number, index) in 3" :number="index.toString()" title="Start with intent">Turn rough thinking into a shared direction before the details take over.
       </FeatureCard>
     </section>
+    </section>
+
   </main>
 </template>
 
@@ -55,4 +69,9 @@ h1 em { color: #687b5d; font-weight: 500; }
   flex-direction: column;
   gap: 10px;
 }
+
+.designer-node-22 {
+  gap: 10px;
+
+  display: grid;}
 </style>

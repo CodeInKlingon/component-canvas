@@ -1,28 +1,17 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import {
   ArrowLeft,
-  Code2,
-  Component,
   FileCode2,
-  Layers3,
-  MousePointer2,
   Maximize2,
   Minus,
   Monitor,
-  PanelBottomClose,
-  PanelBottomOpen,
-  PanelLeftClose,
-  PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
+  MousePointer2,
   Plus,
   Redo2,
-  RefreshCw,
   Save,
   Smartphone,
   Tablet,
-  Trash2,
   Undo2,
 } from '@lucide/vue'
 import type {
@@ -47,27 +36,22 @@ import type {
 import { isPreviewToEditorMessage } from '@vue-designer/shared'
 import { hostKey, readOnlyKey } from '../services/host'
 import type { DesignerRoute } from '../services/router'
-import TreeNode from '../components/TreeNode.vue'
 import SourceEditor from '../components/SourceEditor.vue'
 import AiPromptDialog from '../components/AiPromptDialog.vue'
 import InsertPickerDialog from '../components/InsertPickerDialog.vue'
 import NodeContextMenu from '../components/NodeContextMenu.vue'
-import PaletteItem from '../components/PaletteItem.vue'
 import ReadOnlyBadge from '../components/ReadOnlyBadge.vue'
-import SelectionSummary from '../components/SelectionSummary.vue'
+import DockPanel from '../components/DockPanel.vue'
+import PanelTabMenu from '../components/PanelTabMenu.vue'
+import PanelToggleGroup from '../components/PanelToggleGroup.vue'
+import ToolAddMenu from '../components/ToolAddMenu.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiButtonGroup from '../components/ui/UiButtonGroup.vue'
-import UiColorInput from '../components/ui/UiColorInput.vue'
 import UiEmptyState from '../components/ui/UiEmptyState.vue'
-import UiField from '../components/ui/UiField.vue'
-import UiInput from '../components/ui/UiInput.vue'
 import UiNotice from '../components/ui/UiNotice.vue'
 import UiPanelHeader from '../components/ui/UiPanelHeader.vue'
-import UiSectionHeading from '../components/ui/UiSectionHeading.vue'
+import UiResizeHandle from '../components/ui/UiResizeHandle.vue'
 import UiSegmentedControl, { type UiSegmentOption } from '../components/ui/UiSegmentedControl.vue'
-import UiSelect from '../components/ui/UiSelect.vue'
-import UiTabs from '../components/ui/UiTabs.vue'
-import UiTextarea from '../components/ui/UiTextarea.vue'
 import { SourceHistory } from '../lib/history'
 import { findNode, findNodeAtOffset, findNodeAtPath, findNodePath, findRenderedSelection, reconcileCollapsedTree } from '../lib/selection'
 import { nativeElements, type NativeElementMetadata } from '../lib/native-elements'
@@ -76,7 +60,11 @@ import { captureDragSelection, findDragSelectionOffset, type DragSelection } fro
 import { nodeClipboardMime, parseNodeClipboard, serializeNodeClipboard, type NodeClipboardPayload } from '../lib/node-clipboard'
 import { clampZoom, fitZoom, viewportPresets, zoomAroundPoint, type ViewportMode } from '../lib/canvas'
 import { isCurrentCandidateRequest, resolveCandidateSelection } from '../lib/candidate-state'
+import { type DockZone, type ToolId } from '../lib/dock-layout'
 import { readAiModelPreference, resolveAiModelId, resolveAiModelParams, writeAiModelPreference } from '../services/ai-model-preference'
+import { editorContextKey } from '../composables/editor-context'
+import { useWorkspaceLayout } from '../composables/useWorkspaceLayout'
+import { toolDefinition, toolDefinitions, toolIds } from '../components/tools/registry'
 
 type SaveState = 'clean' | 'dirty' | 'saving' | 'conflict'
 
@@ -114,11 +102,31 @@ const selectedNodeId = ref<string | null>(null)
 const collapsedIds = ref<ReadonlySet<string>>(new Set())
 const treeCollapseState = new Map<string, Set<string>>()
 const candidateId = ref<string | null>(null)
-const inspectorView = ref<'content' | 'style'>('content')
-const sidebarView = ref<'layers' | 'components'>('layers')
-const sidebarOpen = ref(true)
-const inspectorOpen = ref(true)
-const sourceOpen = ref(true)
+const availableToolIds = computed<ReadonlySet<ToolId>>(() => {
+  const availability = { capabilities: framework.value?.capabilities ?? null, readOnly }
+  return new Set(toolDefinitions.filter((tool) => tool.isAvailable(availability)).map((tool) => tool.id))
+})
+const {
+  workspaceRef: layoutWorkspaceRef,
+  style: layoutStyle,
+  resizing: layoutResizing,
+  rightHidden: layoutRightHidden,
+  handleProps: layoutHandleProps,
+  cornerProps: layoutCornerProps,
+  isCollapsed: isZoneCollapsed,
+  setCollapsed: setZoneCollapsed,
+  toggleCollapsed: toggleZone,
+  panelToggles,
+  zoneTools,
+  activeTool,
+  isToolRevealed,
+  activate: activateZoneTool,
+  move: moveZoneTool,
+  hide: hideZoneTool,
+  addOptions: zoneAddOptions,
+  isZoneEmpty,
+  reset: resetLayout,
+} = useWorkspaceLayout({ allTools: toolIds, availableTools: () => availableToolIds.value })
 const activeStyleSelector = ref('')
 const styleRules = ref<DesignerStyleRule[]>([])
 const computedStyles = ref<Record<string, string>>({})
@@ -185,14 +193,6 @@ const viewportOptions: UiSegmentOption<ViewportMode>[] = [
   { value: 'tablet', label: 'Tablet', icon: Tablet, title: 'Tablet viewport (768 × 1024)' },
   { value: 'mobile', label: 'Mobile', icon: Smartphone, title: 'Mobile viewport (390 × 844)' },
 ]
-const sidebarOptions = computed<UiSegmentOption<'layers' | 'components'>[]>(() => [
-  { value: 'layers', label: 'Layers', icon: Layers3 },
-  ...(framework.value?.capabilities.components && !readOnly ? [{ value: 'components' as const, label: 'Components', icon: Component }] : []),
-])
-const inspectorTabs = computed(() => [
-  { value: 'content' as const, label: 'Props' },
-  ...(framework.value?.capabilities.styles ? [{ value: 'style' as const, label: 'Style' }] : []),
-])
 const documentOptions = computed(() => documents.value.map((document) => ({ value: document.path, label: document.name })))
 const styleControls = [
   { group: 'Layout', properties: ['display', 'width', 'height', 'gap'] },
@@ -885,7 +885,7 @@ function selectNode(node: DesignerNode, revealInSource = true): void {
     type: 'select',
     nodeId: canvasNode?.id ?? null,
   }, '*')
-  if (revealInSource && sourceOpen.value) {
+  if (revealInSource && isToolRevealed('source')) {
     requestAnimationFrame(() => {
       sourceEditor.value?.focus()
       sourceEditor.value?.setSelectionRange(node.range.start, node.range.end)
@@ -1243,6 +1243,140 @@ onMounted(() => {
   void loadDocuments()
 })
 
+// --- Dock panels, tool registry, and the context tools inject ---
+
+const zoneLabelChoices: { id: DockZone; label: string }[] = [
+  { id: 'left', label: 'left' },
+  { id: 'right', label: 'right' },
+  { id: 'bottom', label: 'bottom' },
+]
+
+const tabMenu = ref<{ zone: DockZone; id: ToolId; x: number; y: number } | null>(null)
+const addPanelMenu = ref<{ zone: DockZone; x: number; y: number } | null>(null)
+
+function zoneTabs(zone: DockZone) {
+  return zoneTools(zone).map((id) => {
+    const definition = toolDefinition(id)
+    return { id, label: definition?.label ?? id, icon: definition?.icon ?? FileCode2 }
+  })
+}
+
+function activeToolComponent(zone: DockZone) {
+  const id = activeTool(zone)
+  return id ? toolDefinition(id)?.component ?? null : null
+}
+
+function openTabMenu(zone: DockZone, payload: { id: string; x: number; y: number }): void {
+  addPanelMenu.value = null
+  tabMenu.value = { zone, id: payload.id, x: payload.x, y: payload.y }
+}
+
+function openAddMenu(zone: DockZone, payload: { x: number; y: number }): void {
+  tabMenu.value = null
+  addPanelMenu.value = { zone, x: payload.x, y: payload.y }
+}
+
+function moveTabTo(zone: DockZone): void {
+  if (tabMenu.value) moveZoneTool(tabMenu.value.id, zone)
+  tabMenu.value = null
+}
+
+function hideTab(): void {
+  if (tabMenu.value) hideZoneTool(tabMenu.value.id)
+  tabMenu.value = null
+}
+
+function addMenuOptions(zone: DockZone) {
+  return zoneAddOptions(zone).map((id) => ({ id, label: toolDefinition(id)?.label ?? id }))
+}
+
+function addToolTo(zone: DockZone, id: ToolId): void {
+  moveZoneTool(id, zone)
+  addPanelMenu.value = null
+}
+
+function dropOnZone(zone: DockZone, toolId: ToolId): void {
+  moveZoneTool(toolId, zone)
+}
+
+function closeDockMenus(): void {
+  tabMenu.value = null
+  addPanelMenu.value = null
+}
+
+/** Reveal a tool from a collapsed rail: expand the zone and activate the tool. */
+function revealZoneTool(zone: DockZone, id: ToolId): void {
+  setZoneCollapsed(zone, false)
+  activateZoneTool(zone, id)
+}
+
+provide(editorContextKey, {
+  path: computed(() => props.path),
+  documents,
+  documentOptions,
+  switchDocument,
+  showDesigns,
+  loadDocuments,
+  loading,
+  documentMissing,
+  activeDocument,
+  framework,
+  readOnly,
+
+  selectNode,
+  collapsedIds,
+  selectedNodeId,
+  selectedNode,
+  dragKind,
+  draggedNode,
+  toggleCollapse,
+  startNodeDrag,
+  endTreeDrag,
+  handleTreeDrop,
+  openContextMenu,
+
+  components,
+  componentQuery,
+  componentGroups,
+  canContainChildren,
+  startComponentDrag,
+  startNativeDrag,
+  insertComponent,
+  insertNative,
+  nativeElements,
+
+  inspectorLocked,
+  duplicateSelectedNode,
+  removeSelectedNode,
+  updateSelectedText,
+  selectedMetadataProps,
+  selectedComponent,
+  selectedAttribute,
+  propValue,
+  propChecked,
+  propIsExpression,
+  updateComponentProp,
+  clearComponentProp,
+  isMetadataProp,
+  updateSelectedAttribute,
+
+  styleRules,
+  activeStyleRule,
+  activeStyleSelector,
+  styleValue,
+  styleSelector,
+  updateStyle,
+  styleControls,
+  styleOptions,
+  computedStyles,
+
+  source,
+  updateSource,
+  commitSourceEdit,
+  syncSelectionFromSource,
+  sourceEditor,
+})
+
 defineExpose({ hasUnsavedChanges })
 
 onUnmounted(() => {
@@ -1259,11 +1393,14 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="studio">
+  <div class="studio" :style="layoutStyle">
     <header class="topbar">
       <div class="brand">
         <UiButton variant="ghost" class="back-link" title="All designs" @click="showDesigns"><template #icon><ArrowLeft :size="15" /></template>Designs</UiButton>
         <ReadOnlyBadge v-if="readOnly" />
+      </div>
+      <div class="panel-toggles-cell">
+        <PanelToggleGroup :panels="panelToggles" @toggle="toggleZone" @reset="resetLayout" />
       </div>
       <div class="document-title">
         <FileCode2 :size="14" />
@@ -1283,91 +1420,24 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <main class="workspace" :class="{ 'sidebar-collapsed': !sidebarOpen, 'inspector-collapsed': !inspectorOpen }">
-      <aside class="sidebar" :class="{ collapsed: !sidebarOpen }">
-        <UiPanelHeader class="panel-heading" :title="sidebarOpen ? (sidebarView === 'layers' ? 'Layers' : 'Components') : undefined">
-          <template #actions>
-            <template v-if="sidebarOpen">
-              <UiButton variant="ghost" size="sm" icon-only label="Refresh project" @click="loadDocuments"><RefreshCw :size="14" /></UiButton>
-              <UiButton variant="ghost" size="sm" icon-only label="Collapse left panel" @click="sidebarOpen = false"><PanelLeftClose :size="15" /></UiButton>
-            </template>
-            <UiButton v-else variant="ghost" size="sm" icon-only label="Expand left panel" @click="sidebarOpen = true"><PanelLeftOpen :size="15" /></UiButton>
-          </template>
-        </UiPanelHeader>
-        <div v-if="sidebarOpen" class="sidebar-content">
-          <template v-if="sidebarView === 'layers'">
-            <UiSelect class="document-picker" :value="path" :options="documentOptions" aria-label="Active document" @change="switchDocument(($event.target as HTMLSelectElement).value)">
-              <template #leading><FileCode2 :size="15" /></template>
-            </UiSelect>
-            <UiEmptyState v-if="loading">Scanning project...</UiEmptyState>
-            <ul v-else-if="activeDocument" class="tree-list">
-              <TreeNode
-                v-for="node in activeDocument.tree"
-                :key="node.id"
-                :node="node"
-                :selected-id="selectedNodeId"
-                :collapsed-ids="collapsedIds"
-                :drag-kind="dragKind"
-                :dragged-node="draggedNode"
-                @select="selectNode"
-                @toggle-collapse="toggleCollapse"
-                @drag-node="startNodeDrag"
-                @drag-end="endTreeDrag"
-                @drop-node="handleTreeDrop"
-                @context-menu="openContextMenu"
-              />
-            </ul>
-            <UiEmptyState v-else-if="documentMissing">
-              <code>{{ path }}</code> is not a design in this project.
-              <template #actions><UiButton variant="ghost" class="back-link" @click="showDesigns"><template #icon><ArrowLeft :size="14" /></template>All designs</UiButton></template>
-            </UiEmptyState>
-            <UiEmptyState v-else>Loading design...</UiEmptyState>
-            <UiNotice v-if="activeDocument?.diagnostics.length" class="panel-notice" tone="danger">{{ activeDocument.diagnostics[0]?.message }}</UiNotice>
-          </template>
-          <template v-else>
-            <UiNotice class="panel-notice">Insert into <strong>{{ selectedNode?.label ?? 'a selected container' }}</strong></UiNotice>
-            <UiInput v-if="components.length" v-model="componentQuery" class="palette-search" type="search" placeholder="Search components" aria-label="Search components" />
-            <template v-for="group in componentGroups" :key="group.id">
-              <UiSectionHeading class="palette-heading">{{ group.label }}</UiSectionHeading>
-              <div class="palette-list">
-                <PaletteItem
-                  v-for="component in group.components"
-                  :key="component.id"
-                  :label="component.label"
-                  :category="component.category"
-                  kind="component"
-                  :disabled="!canContainChildren(selectedNode)"
-                  :title="selectedNode ? `Insert <${component.tag}> into ${selectedNode.label}` : 'Select a container first'"
-                  draggable="true"
-                  @dragstart="startComponentDrag($event, component)"
-                  @dragend="endTreeDrag"
-                  @click="insertComponent(component)"
-                />
-              </div>
-            </template>
-            <UiEmptyState v-if="components.length && !componentGroups.length">No components match “{{ componentQuery }}”.</UiEmptyState>
-            <UiSectionHeading class="palette-heading">Native elements</UiSectionHeading>
-            <div class="palette-list">
-              <PaletteItem
-                v-for="element in nativeElements"
-                :key="element.tag"
-                :label="element.label"
-                :category="element.category"
-                kind="native"
-                :disabled="!canContainChildren(selectedNode)"
-                :title="selectedNode ? `Insert into ${selectedNode.label}` : 'Select a container first'"
-                draggable="true"
-                @dragstart="startNativeDrag($event, element)"
-                @dragend="endTreeDrag"
-                @click="insertNative(element)"
-              />
-            </div>
-          </template>
-        </div>
-        <UiSegmentedControl v-if="sidebarOpen" v-model="sidebarView" class="sidebar-switcher" appearance="pills" size="sm" :options="sidebarOptions" aria-label="Sidebar view" />
-      </aside>
+    <main ref="layoutWorkspaceRef" class="workspace" :class="{ resizing: layoutResizing }">
+      <DockPanel
+        zone="left"
+        :tabs="zoneTabs('left')"
+        :active="activeTool('left')"
+        :collapsed="isZoneCollapsed('left')"
+        @activate="(id) => activateZoneTool('left', id)"
+        @menu="openTabMenu('left', $event)"
+        @reorder="(payload) => moveZoneTool(payload.id, 'left', payload.before)"
+        @drag-start="closeDockMenus"
+        @add="openAddMenu('left', $event)"
+        @select="(id) => revealZoneTool('left', id)"
+        @drop="dropOnZone"
+      >
+        <component :is="activeToolComponent('left')" v-if="activeToolComponent('left')" />
+      </DockPanel>
 
-      <div class="center-workspace" :class="{ 'source-collapsed': !sourceOpen }">
+      <div class="center-workspace">
         <section class="canvas-panel">
           <UiPanelHeader variant="caption" :title="`Canvas · ${viewportLabel}`">
             <template #actions>
@@ -1413,176 +1483,64 @@ onUnmounted(() => {
             <div v-if="canvasOwnsInput && viewportMode !== 'responsive'" class="canvas-input-capture" @click="selectCanvasPoint" />
           </div>
         </section>
-        <section class="source-panel">
-          <UiPanelHeader>
-            <template #title><Code2 :size="14" />Source</template>
-            <code class="source-panel-name">{{ activeDocument?.name ?? 'No document' }}</code>
-            <template #actions>
-              <UiButton variant="ghost" size="sm" icon-only :label="sourceOpen ? 'Collapse source' : 'Open source'" @click="sourceOpen = !sourceOpen">
-                <PanelBottomClose v-if="sourceOpen" :size="15" /><PanelBottomOpen v-else :size="15" />
-              </UiButton>
-            </template>
-          </UiPanelHeader>
-          <SourceEditor
-            v-if="framework"
-            v-show="sourceOpen"
-            :key="`${framework.sourceLanguage}:${activeDocument?.path ?? ''}`"
-            ref="sourceEditor"
-            :source="source"
-            :file-name="activeDocument?.path.split('/').at(-1) ?? `document${framework.fileExtension}`"
-            :language="framework.sourceLanguage"
-            :document-label="framework.documentLabel"
-            :disabled="readOnly || !activeDocument"
-            @input="updateSource"
-            @blur="commitSourceEdit"
-            @cursor="syncSelectionFromSource"
-          />
-        </section>
+        <DockPanel
+          zone="bottom"
+          :tabs="zoneTabs('bottom')"
+          :active="activeTool('bottom')"
+          :collapsed="isZoneCollapsed('bottom')"
+          @activate="(id) => activateZoneTool('bottom', id)"
+          @menu="openTabMenu('bottom', $event)"
+          @reorder="(payload) => moveZoneTool(payload.id, 'bottom', payload.before)"
+          @drag-start="closeDockMenus"
+          @add="openAddMenu('bottom', $event)"
+          @select="(id) => revealZoneTool('bottom', id)"
+          @drop="dropOnZone"
+        >
+          <component :is="activeToolComponent('bottom')" v-if="activeToolComponent('bottom')" />
+        </DockPanel>
       </div>
 
-      <aside class="inspector-panel" :class="{ collapsed: !inspectorOpen }">
-        <UiTabs v-model="inspectorView" class="inspector-tabs" :tabs="inspectorOpen ? inspectorTabs : []">
-          <template #trailing>
-            <UiButton variant="ghost" size="sm" icon-only :label="inspectorOpen ? 'Collapse right panel' : 'Expand right panel'" @click="inspectorOpen = !inspectorOpen">
-              <PanelRightClose v-if="inspectorOpen" :size="15" /><PanelRightOpen v-else :size="15" />
-            </UiButton>
-          </template>
-        </UiTabs>
+      <DockPanel
+        zone="right"
+        :tabs="zoneTabs('right')"
+        :active="activeTool('right')"
+        :collapsed="isZoneCollapsed('right')"
+        @activate="(id) => activateZoneTool('right', id)"
+        @menu="openTabMenu('right', $event)"
+        @reorder="(payload) => moveZoneTool(payload.id, 'right', payload.before)"
+        @drag-start="closeDockMenus"
+        @add="openAddMenu('right', $event)"
+        @select="(id) => revealZoneTool('right', id)"
+        @drop="dropOnZone"
+      >
+        <component :is="activeToolComponent('right')" v-if="activeToolComponent('right')" />
+      </DockPanel>
 
-        <div v-if="inspectorOpen && inspectorView === 'content'" class="inspector-content">
-          <UiEmptyState v-if="!selectedNode" title="Select a layer">Text and attributes for the selected element will appear here.</UiEmptyState>
-          <template v-else>
-            <SelectionSummary :node="selectedNode" :subtitle="selectedNode.kind">
-              <template v-if="!readOnly" #actions>
-                <UiButton variant="ghost" size="sm" icon-only :disabled="!selectedNode.editable" label="Duplicate layer" @click="duplicateSelectedNode"><Plus :size="14" /></UiButton>
-                <UiButton variant="ghost" size="sm" icon-only danger :disabled="!selectedNode.editable" label="Delete layer" @click="removeSelectedNode"><Trash2 :size="14" /></UiButton>
-              </template>
-            </SelectionSummary>
-            <section v-if="selectedNode.kind === 'text'" class="inspector-section">
-              <UiField label="Text content">
-                <UiTextarea :value="selectedNode.value" mono :readonly="inspectorLocked" @input="updateSelectedText" />
-              </UiField>
-            </section>
-            <section v-if="selectedMetadataProps.length" class="inspector-section">
-              <UiSectionHeading variant="title">{{ selectedComponent ? 'Props' : 'Attributes' }}</UiSectionHeading>
-              <UiField
-                v-for="prop in selectedMetadataProps"
-                :key="prop.name"
-                :label="prop.name"
-                :hint="prop.required ? 'Required' : prop.type"
-                :title="prop.description || prop.type"
-              >
-                <div class="prop-control">
-                  <input
-                    v-if="prop.control === 'checkbox'"
-                    type="checkbox"
-                    :checked="propChecked(prop)"
-                    :disabled="inspectorLocked || propIsExpression(prop)"
-                    @change="updateComponentProp(prop, $event)"
-                  />
-                  <UiSelect
-                    v-else-if="prop.control === 'select'"
-                    :value="propValue(prop)"
-                    :options="prop.options ?? []"
-                    :empty-option="prop.required ? undefined : 'Default'"
-                    mono
-                    :disabled="inspectorLocked || propIsExpression(prop)"
-                    @change="updateComponentProp(prop, $event)"
-                  />
-                  <UiColorInput
-                    v-else-if="prop.control === 'color'"
-                    :value="propValue(prop)"
-                    :label="prop.name"
-                    :readonly="inspectorLocked"
-                    :disabled="propIsExpression(prop)"
-                    @change="updateComponentProp(prop, $event)"
-                  />
-                  <UiInput
-                    v-else
-                    :type="prop.control === 'number' ? 'number' : 'text'"
-                    :value="propValue(prop)"
-                    mono
-                    :readonly="inspectorLocked"
-                    :disabled="propIsExpression(prop)"
-                    @change="updateComponentProp(prop, $event)"
-                  />
-                  <UiButton v-if="selectedAttribute(prop.name) && !prop.required && !inspectorLocked" variant="ghost" size="sm" title="Use default value" @click="clearComponentProp(prop)">Reset</UiButton>
-                </div>
-                <template v-if="propIsExpression(prop)" #note><small class="expression-note">Expression props are source-only.</small></template>
-              </UiField>
-            </section>
-            <section v-if="selectedNode.attributes.some((attribute) => !isMetadataProp(attribute.name))" class="inspector-section">
-              <UiSectionHeading variant="title">Attributes</UiSectionHeading>
-              <UiField
-                v-for="attribute in selectedNode.attributes.filter((item) => !isMetadataProp(item.name))"
-                :key="attribute.name"
-                :label="attribute.name"
-                :hint="attribute.editable ? undefined : 'Expression'"
-              >
-                <UiInput
-                  :value="attribute.value"
-                  mono
-                  :readonly="inspectorLocked"
-                  :disabled="!attribute.editable"
-                  @change="updateSelectedAttribute(attribute.name, $event)"
-                />
-              </UiField>
-            </section>
-            <UiEmptyState v-if="selectedNode.kind !== 'text' && !selectedNode.attributes.length && !selectedMetadataProps.length" compact>No attributes on this layer.</UiEmptyState>
-            <UiNotice v-if="!selectedNode.editable" class="panel-notice" tone="warning">{{ selectedNode.lockedReason }}</UiNotice>
-            <UiNotice v-else-if="readOnly" class="panel-notice">Read-only build. Run the dev server to edit this design.</UiNotice>
-          </template>
-        </div>
-
-        <div v-else-if="inspectorOpen && inspectorView === 'style' && framework?.capabilities.styles" class="inspector-content">
-          <UiEmptyState v-if="!selectedNode || selectedNode.kind === 'text'" title="Select an element">Editable local CSS rules will appear here.</UiEmptyState>
-          <template v-else>
-            <SelectionSummary :node="selectedNode" subtitle="Styles" />
-            <section class="inspector-section">
-              <UiField v-if="styleRules.length" label="Local rule">
-                <UiSelect
-                  :value="activeStyleRule?.selector"
-                  :options="styleRules.map((rule) => rule.selector)"
-                  mono
-                  @change="activeStyleSelector = ($event.target as HTMLSelectElement).value"
-                />
-              </UiField>
-              <UiField v-else as="div" label="Local rule">
-                <code class="style-rule-new">{{ styleSelector() }} (new)</code>
-              </UiField>
-            </section>
-            <section v-for="group in styleControls" :key="group.group" class="inspector-section style-section">
-              <UiSectionHeading variant="title">{{ group.group }}</UiSectionHeading>
-              <UiField v-for="property in group.properties" :key="property" :label="property" layout="inline">
-                <UiSelect
-                  v-if="styleOptions[property]"
-                  :value="styleValue(property)"
-                  :options="styleOptions[property]"
-                  empty-option="Unset"
-                  mono
-                  :disabled="inspectorLocked"
-                  @change="updateStyle(property, $event)"
-                />
-                <UiColorInput
-                  v-else-if="property === 'color' || property === 'background-color'"
-                  :value="styleValue(property)"
-                  :label="property"
-                  :readonly="inspectorLocked"
-                  placeholder="Unset"
-                  @change="updateStyle(property, $event)"
-                />
-                <UiInput v-else :value="styleValue(property)" mono :readonly="inspectorLocked" placeholder="Unset" @change="updateStyle(property, $event)" />
-              </UiField>
-            </section>
-            <section v-if="Object.keys(computedStyles).length" class="inspector-section computed-section">
-              <UiSectionHeading variant="title">Computed</UiSectionHeading>
-              <div v-for="(value, property) in computedStyles" :key="property" class="computed-row">
-                <span>{{ property }}</span><code>{{ value || 'initial' }}</code>
-              </div>
-            </section>
-          </template>
-        </div>
-      </aside>
+      <UiResizeHandle
+        v-if="!isZoneCollapsed('left')"
+        class="resize-handle--left"
+        v-bind="layoutHandleProps('left')"
+      />
+      <UiResizeHandle
+        v-if="!isZoneCollapsed('right') && !layoutRightHidden"
+        class="resize-handle--right"
+        v-bind="layoutHandleProps('right')"
+      />
+      <UiResizeHandle
+        v-if="!isZoneCollapsed('bottom')"
+        class="resize-handle--bottom"
+        v-bind="layoutHandleProps('bottom')"
+      />
+      <UiResizeHandle
+        v-if="!isZoneCollapsed('left') && !isZoneCollapsed('bottom')"
+        class="resize-handle--corner-left"
+        v-bind="layoutCornerProps('left')"
+      />
+      <UiResizeHandle
+        v-if="!isZoneCollapsed('right') && !layoutRightHidden && !isZoneCollapsed('bottom')"
+        class="resize-handle--corner-right"
+        v-bind="layoutCornerProps('right')"
+      />
     </main>
 
     <UiNotice v-if="error || previewDiagnostic" class="diagnostic" tone="danger" inline>
@@ -1598,6 +1556,25 @@ onUnmounted(() => {
         <UiButton size="sm" @click="error = ''; previewDiagnostic = null">Dismiss</UiButton>
       </template>
     </UiNotice>
+    <PanelTabMenu
+      v-if="tabMenu"
+      :x="tabMenu.x"
+      :y="tabMenu.y"
+      :tool-label="toolDefinition(tabMenu.id)?.label ?? ''"
+      :current-zone="tabMenu.zone"
+      :zones="zoneLabelChoices"
+      @move="moveTabTo"
+      @hide="hideTab"
+      @close="tabMenu = null"
+    />
+    <ToolAddMenu
+      v-if="addPanelMenu"
+      :x="addPanelMenu.x"
+      :y="addPanelMenu.y"
+      :options="addMenuOptions(addPanelMenu.zone)"
+      @add="addToolTo(addPanelMenu.zone, $event)"
+      @close="addPanelMenu = null"
+    />
     <NodeContextMenu
       v-if="contextMenu"
       :x="contextMenu.x"
