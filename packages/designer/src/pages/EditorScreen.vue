@@ -205,9 +205,7 @@ const canRedo = computed(() => (historyVersion.value, history.canRedo))
 const viewportSize = computed(() => viewportMode.value === 'responsive'
   ? { width: Math.max(1, canvasSize.value.width), height: Math.max(1, canvasSize.value.height) }
   : viewportPresets[viewportMode.value])
-const viewportLabel = computed(() => viewportMode.value === 'responsive'
-  ? `Responsive · ${viewportSize.value.width} × ${viewportSize.value.height}`
-  : `${viewportSize.value.width} × ${viewportSize.value.height}`)
+const viewportSizeLabel = computed(() => `${viewportSize.value.width} × ${viewportSize.value.height}`)
 const canvasSceneStyle = computed(() => ({
   width: `${viewportSize.value.width}px`,
   height: `${viewportSize.value.height}px`,
@@ -1407,7 +1405,6 @@ onUnmounted(() => {
         <span class="status-dot" :class="saveState" />
       </div>
       <div class="actions">
-        <UiSegmentedControl :model-value="viewportMode" class="viewport-switcher" :options="viewportOptions" aria-label="Preview viewport" @update:model-value="setViewportMode" />
         <template v-if="!readOnly">
           <span class="save-state">{{ stateLabel }}</span>
           <UiButtonGroup aria-label="Document history">
@@ -1438,7 +1435,11 @@ onUnmounted(() => {
 
       <div class="center-workspace">
         <section class="canvas-panel">
-          <UiPanelHeader variant="caption" :title="`Canvas · ${viewportLabel}`">
+          <UiPanelHeader variant="caption">
+            <template #title>
+              <UiSegmentedControl :model-value="viewportMode" class="viewport-switcher" size="xs" :options="viewportOptions" aria-label="Preview viewport" @update:model-value="setViewportMode" />
+            </template>
+            <span class="canvas-size-label">{{ viewportSizeLabel }}</span>
             <template #actions>
               <UiButtonGroup aria-label="Canvas zoom">
                 <UiButton variant="ghost" size="xs" icon-only :disabled="viewportMode === 'responsive'" label="Zoom out" @click="setCanvasZoom(canvasZoom / 1.2)"><Minus :size="13" /></UiButton>

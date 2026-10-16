@@ -1,13 +1,24 @@
 {
   "name": "@component-canvas/designer",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "The Component Canvas editor UI.",
   "type": "module",
+  "files": [
+    "src",
+    "!src/**/*.test.ts"
+  ],
   "scripts": {
     "build": "vue-tsc --noEmit",
     "typecheck": "vue-tsc --noEmit",
     "test": "vitest run --passWithNoTests"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CodeInKlingon/vue-designer.git",
+    "directory": "packages/designer"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@lucide/vue": "^1.31.0",

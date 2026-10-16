@@ -1,9 +1,11 @@
 {
   "name": "@component-canvas/vue",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "Vue SFC adapter for Component Canvas: parsing, mutation, preview, and component metadata.",
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -13,7 +15,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "tsc -p tsconfig.build.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CodeInKlingon/vue-designer.git",
+    "directory": "packages/vue"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@vitejs/plugin-vue": "^5.2.4",

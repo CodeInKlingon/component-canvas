@@ -1,9 +1,11 @@
 {
   "name": "@component-canvas/shared",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "Framework-neutral document model, protocol types, and validation for Component Canvas.",
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -13,7 +15,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "prepublishOnly": "tsc -p tsconfig.build.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CodeInKlingon/vue-designer.git",
+    "directory": "packages/shared"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {},
   "devDependencies": {

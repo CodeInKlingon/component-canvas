@@ -1,4 +1,3 @@
-import { Agent, Cursor } from '@cursor/sdk'
 import type { DesignerAiModel, DesignerAiModelParameterValue } from '@component-canvas/shared'
 
 export interface CursorAiOptions {
@@ -15,7 +14,20 @@ function requireApiKey(options: CursorAiOptions): string {
   return apiKey
 }
 
+/** Loads the optional Cursor SDK on demand so non-AI consumers never import it. */
+async function cursorSdk(): Promise<typeof import('@cursor/sdk')> {
+  try {
+    return await import('@cursor/sdk')
+  } catch (cause) {
+    throw new Error(
+      "AI editing requires the optional '@cursor/sdk' package. Install it to use the `ai` option.",
+      { cause },
+    )
+  }
+}
+
 export async function listAiModels(options: CursorAiOptions): Promise<DesignerAiModel[]> {
+  const { Cursor } = await cursorSdk()
   const models = await Cursor.models.list({ apiKey: requireApiKey(options) })
   return models.map(({ id, displayName, description, parameters = [], variants = [] }) => ({
     id,
@@ -48,6 +60,7 @@ export async function runAiPrompt(
   root: string,
   options: CursorAiOptions,
 ): Promise<string> {
+  const { Agent } = await cursorSdk()
   const result = await Agent.prompt(prompt, {
     apiKey: requireApiKey(options),
     model: { id: options.model ?? defaultAiModel, params: options.params?.length ? options.params : undefined },

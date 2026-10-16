@@ -88,9 +88,6 @@ importers:
       '@component-canvas/shared':
         specifier: workspace:*
         version: link:../shared
-      '@cursor/sdk':
-        specifier: ^1.0.27
-        version: 1.0.27
       fast-glob:
         specifier: ^3.3.3
         version: 3.3.3
@@ -98,6 +95,9 @@ importers:
         specifier: ^4.0.5
         version: 4.0.5
     devDependencies:
+      '@cursor/sdk':
+        specifier: ^1.0.27
+        version: 1.0.27
       '@types/node':
         specifier: ^24.0.3
         version: 24.13.3

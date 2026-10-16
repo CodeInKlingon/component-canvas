@@ -1,9 +1,11 @@
 {
   "name": "@component-canvas/vite",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "Framework-agnostic visual editor plugin for Vite that keeps source files authoritative.",
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -13,16 +15,25 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "tsc -p tsconfig.build.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CodeInKlingon/vue-designer.git",
+    "directory": "packages/vite-plugin"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
-    "@cursor/sdk": "^1.0.27",
     "@component-canvas/designer": "workspace:*",
     "@component-canvas/shared": "workspace:*",
     "fast-glob": "^3.3.3",
     "picomatch": "^4.0.5"
   },
   "devDependencies": {
+    "@cursor/sdk": "^1.0.27",
     "@types/node": "^24.0.3",
     "@types/picomatch": "^4.0.3",
     "typescript": "^5.8.3",
@@ -30,6 +41,12 @@
     "vitest": "^3.2.4"
   },
   "peerDependencies": {
+    "@cursor/sdk": "^1.0.27",
     "vite": "^6.0.0 || ^7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@cursor/sdk": {
+      "optional": true
+    }
   }
 }
