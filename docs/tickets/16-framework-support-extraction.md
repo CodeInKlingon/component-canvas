@@ -10,8 +10,8 @@ The editor may continue to be implemented in Vue. This ticket separates the fram
 
 ```ts
 import { defineConfig } from 'vite'
-import designer from '@vue-designer/vite'
-import vue from '@vue-designer/vue'
+import designer from '@component-canvas/vite'
+import vue from '@component-canvas/vue'
 
 export default defineConfig({
   plugins: [
@@ -29,7 +29,7 @@ The Vue support package owns and contributes the configured `@vitejs/plugin-vue`
 
 ## Target Packages
 
-### `@vue-designer/shared`
+### `@component-canvas/shared`
 
 Framework-neutral, serializable contracts only:
 
@@ -41,14 +41,14 @@ Framework-neutral, serializable contracts only:
 
 It must not depend on Vue compiler or Vue component metadata packages.
 
-### `@vue-designer/designer`
+### `@component-canvas/designer`
 
 - The editor UI, which may remain implemented in Vue
 - Framework-neutral tree, source, history, selection, and canvas workflows
 - No edited-document parser, compiler, or source mutator
 - Controls enabled from server-provided framework and node capabilities
 
-### `@vue-designer/vite`
+### `@component-canvas/vite`
 
 - Framework-neutral Vite server integration
 - Document discovery and root confinement
@@ -58,7 +58,7 @@ It must not depend on Vue compiler or Vue component metadata packages.
 - Framework-neutral API routing
 - Delegation of document-specific behavior to the configured framework support
 
-### `@vue-designer/vue`
+### `@component-canvas/vue`
 
 - Vue SFC and template parsing
 - Vue source operations and validation
@@ -134,19 +134,19 @@ This data-flow change should be completed before moving implementation files bet
 - Remove edited-document Vue compiler code from the designer browser dependency graph.
 - Keep the editor's own Vue runtime independent from document support.
 
-### 4. Create `@vue-designer/vue`
+### 4. Create `@component-canvas/vue`
 
 - Add a new workspace package at `packages/vue`.
 - Move `packages/shared/src/parse.ts` and its behavioral tests into it.
 - Move Vue-specific SFC style discovery and mutation into it.
 - Move `@vue/compiler-dom`, `@vue/compiler-sfc`, and applicable PostCSS dependencies to it.
 - Export a `vue()` framework factory.
-- Stop exporting Vue parser and mutator runtime functions from `@vue-designer/shared`.
+- Stop exporting Vue parser and mutator runtime functions from `@component-canvas/shared`.
 - Do not add compatibility re-exports that preserve the unwanted shared-to-Vue dependency.
 
 ### 5. Delegate Vite Behavior
 
-- Require `framework` in the `@vue-designer/vite` options.
+- Require `framework` in the `@component-canvas/vite` options.
 - Delegate parsing, validation, source mutation, style behavior, and instrumentation to it.
 - Let Vue support contribute `@vitejs/plugin-vue` while preserving host-configured compiler options.
 - Move `.vue` candidate IDs, saved preview IDs, and Vue SFC subrequest handling to Vue support.
@@ -178,7 +178,7 @@ This data-flow change should be completed before moving implementation files bet
 
 ### 9. Update Examples And Documentation
 
-- Change `examples/basic` to import `@vue-designer/vue` and pass `framework: vue()`.
+- Change `examples/basic` to import `@component-canvas/vue` and pass `framework: vue()`.
 - Remove standalone duplicate registration of `@vitejs/plugin-vue`.
 - Document how Vue compiler options are supplied through Vue support.
 - Document the framework contract and capability model only after the Vue extraction proves the required boundary.
@@ -189,18 +189,18 @@ This data-flow change should be completed before moving implementation files bet
 The intended dependency direction is:
 
 ```text
-@vue-designer/shared <- @vue-designer/designer
-@vue-designer/shared <- @vue-designer/vite
-@vue-designer/shared <- @vue-designer/vue
+@component-canvas/shared <- @component-canvas/designer
+@component-canvas/shared <- @component-canvas/vite
+@component-canvas/shared <- @component-canvas/vue
 
-@vue-designer/vite receives @vue-designer/vue at configuration time
+@component-canvas/vite receives @component-canvas/vue at configuration time
 ```
 
 The following dependencies are prohibited:
 
-- `@vue-designer/shared` to `@vue-designer/vue`
-- `@vue-designer/designer` to the edited-document Vue compiler or adapter
-- A static runtime import from `@vue-designer/vite` to `@vue-designer/vue`
+- `@component-canvas/shared` to `@component-canvas/vue`
+- `@component-canvas/designer` to the edited-document Vue compiler or adapter
+- A static runtime import from `@component-canvas/vite` to `@component-canvas/vue`
 - Vue compiler or `vue-component-meta` dependencies in framework-neutral packages
 
 ## Test Plan
@@ -256,10 +256,10 @@ The following dependencies are prohibited:
 ## Acceptance Criteria
 
 - [ ] The example config explicitly imports Vue support and passes it as `framework: vue()`.
-- [ ] `@vue-designer/vite` can be tested with a fake framework and has no static Vue support dependency.
-- [ ] `@vue-designer/shared` has no Vue compiler dependencies or Vue parser/mutator exports.
-- [ ] `@vue-designer/designer` does not parse or mutate edited Vue source locally.
-- [ ] `@vue-designer/vue` owns Vue parsing, mutation, instrumentation, styles, preview mounting, metadata, and AI language behavior.
+- [ ] `@component-canvas/vite` can be tested with a fake framework and has no static Vue support dependency.
+- [ ] `@component-canvas/shared` has no Vue compiler dependencies or Vue parser/mutator exports.
+- [ ] `@component-canvas/designer` does not parse or mutate edited Vue source locally.
+- [ ] `@component-canvas/vue` owns Vue parsing, mutation, instrumentation, styles, preview mounting, metadata, and AI language behavior.
 - [ ] Every candidate mutation and save is reparsed and validated by the configured framework.
 - [ ] Unsupported framework capabilities are represented explicitly and handled safely by the editor.
 - [ ] Existing Vue workflows retain their behavior, including candidate preview, save/reload, and undo/redo.
@@ -280,7 +280,7 @@ The following dependencies are prohibited:
 1. Introduce neutral contracts and capability metadata.
 2. Move visual source mutation behind the server API.
 3. Make the editor consume framework metadata and remove its edited-document compiler dependency.
-4. Create and populate `@vue-designer/vue`.
+4. Create and populate `@component-canvas/vue`.
 5. Inject the framework into Vite core and delegate language behavior.
 6. Extract preview, metadata, style, and AI behavior.
 7. Remove old Vue exports and dependencies.

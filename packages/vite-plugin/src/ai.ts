@@ -1,5 +1,5 @@
 import { Agent, Cursor } from '@cursor/sdk'
-import type { DesignerAiModel, DesignerAiModelParameterValue } from '@vue-designer/shared'
+import type { DesignerAiModel, DesignerAiModelParameterValue } from '@component-canvas/shared'
 
 export interface CursorAiOptions {
   apiKey?: string

@@ -1,7 +1,8 @@
 {
-  "name": "@vue-designer/shared",
+  "name": "@component-canvas/shared",
   "version": "0.0.0",
   "private": true,
+  "description": "Framework-neutral document model, protocol types, and validation for Component Canvas.",
   "type": "module",
   "exports": {
     ".": {

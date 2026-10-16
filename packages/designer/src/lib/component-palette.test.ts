@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { DesignerComponentMetadata } from '@vue-designer/shared'
+import type { DesignerComponentMetadata } from '@component-canvas/shared'
 import { createInsertComponentOperation, findComponentForTag, groupComponents, relativeImport } from './component-palette'
 
 function component(overrides: Partial<DesignerComponentMetadata>): DesignerComponentMetadata {

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 import fg from 'fast-glob'
 import picomatch from 'picomatch'
 import { loadEnv, mergeConfig, normalizePath, type Plugin, type PluginOption, type ResolvedConfig, type UserConfig, type ViteDevServer } from 'vite'
@@ -30,8 +30,8 @@ import type {
   ParsedDesignerDocument,
   PreviewCandidateResponse,
   SaveDocumentRequest,
-} from '@vue-designer/shared'
-import { DesignerOperationError, isDesignerSourceOperation } from '@vue-designer/shared'
+} from '@component-canvas/shared'
+import { DesignerOperationError, isDesignerSourceOperation } from '@component-canvas/shared'
 import { CapabilityStore } from './capabilities.js'
 import { defaultAiModel, invalidAiModelParams, listAiModels, runAiPrompt, type CursorAiOptions } from './ai.js'
 
@@ -95,9 +95,8 @@ export interface DesignerOptions<TFramework extends DesignerFramework = Designer
   ai?: CursorAiOptions
 }
 
-const designerEntry = fileURLToPath(
-  new URL('../../designer/src/main.ts', import.meta.url),
-)
+const require = createRequire(import.meta.url)
+const designerEntry = require.resolve('@component-canvas/designer/src/main.ts')
 
 function revision(source: string): string {
   return createHash('sha256').update(source).digest('hex')
@@ -228,7 +227,7 @@ export function resolveNewDocumentPath(
 
 function designerShell(mode: DesignerMode, scriptSource: string): string {
   return `<!doctype html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="vue-designer-mode" content="${mode}"><title>Vue Designer</title></head>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="vue-designer-mode" content="${mode}"><title>Component Canvas</title></head>
 <body><div id="app"></div><script type="module" src="${scriptSource}"></script></body></html>`
 }
 
@@ -458,7 +457,7 @@ function createDesignerPlugin(options: DesignerOptions): Plugin {
   const roots = documentRoots(patterns)
   // A production build replaces the host app with a static, read-only designer.
   let mode: DesignerMode = 'edit'
-  const clientId = '/@vue-designer/client'
+  const clientId = '/@component-canvas/client'
   const staticPreviewId = '\0vue-designer:static-preview'
   const staticDocumentId = '\0vue-designer:static-document'
   let designerHtmlId = ''

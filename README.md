@@ -1,4 +1,4 @@
-# Vue Designer
+# Component Canvas
 
 A web-based visual editor that keeps framework source files authoritative and renders them through the host project's Vite pipeline. Vue document support is provided by a separate adapter package.
 
@@ -6,8 +6,8 @@ A web-based visual editor that keeps framework source files authoritative and re
 
 ```ts
 import { defineConfig } from 'vite'
-import designer from '@vue-designer/vite'
-import vue from '@vue-designer/vue'
+import designer from '@component-canvas/vite'
+import vue from '@component-canvas/vue'
 
 export default defineConfig({
   plugins: [
@@ -54,7 +54,7 @@ components: {
 
 Vue support owns the `@vitejs/plugin-vue` integration. Do not register a second Vue plugin in the application. Pass normal plugin-vue options to `vue()`, for example `vue({ template: { compilerOptions: {} } })`.
 
-`@vue-designer/vite` contains framework-neutral discovery, candidate lifecycle, persistence, API security, and preview isolation. `@vue-designer/vue` contains Vue SFC parsing, source and style mutation, instrumentation, preview mounting, component metadata, AI language behavior, and compiler integration.
+`@component-canvas/vite` contains framework-neutral discovery, candidate lifecycle, persistence, API security, and preview isolation. `@component-canvas/vue` contains Vue SFC parsing, source and style mutation, instrumentation, preview mounting, component metadata, AI language behavior, and compiler integration.
 
 ## Development
 

@@ -1,4 +1,4 @@
-import type { DesignerNode } from '@vue-designer/shared'
+import type { DesignerNode } from '@component-canvas/shared'
 
 export const nodeClipboardMime = 'application/x-vue-designer-node+json'
 

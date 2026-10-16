@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Sparkles } from '@lucide/vue'
-import type { DesignerAiModel } from '@vue-designer/shared'
+import type { DesignerAiModel } from '@component-canvas/shared'
 import UiButton from './ui/UiButton.vue'
 import UiDialog from './ui/UiDialog.vue'
 import UiField from './ui/UiField.vue'

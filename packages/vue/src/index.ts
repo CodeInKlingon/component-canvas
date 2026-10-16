@@ -1,11 +1,11 @@
 import vuePlugin, { type Options as VuePluginOptions } from '@vitejs/plugin-vue'
-import { DesignerOperationError } from '@vue-designer/shared'
+import { DesignerOperationError } from '@component-canvas/shared'
 import type {
   DesignerAiRequest,
   DesignerFrameworkClientMetadata,
   DesignerSourceOperation,
   DesignerStyleOperation,
-} from '@vue-designer/shared'
+} from '@component-canvas/shared'
 import type { ResolvedConfig, ViteDevServer } from 'vite'
 import { createVueComponents, type VueComponentSource, type VueComponentsOptions } from './components.js'
 import { applySourceOperationWithResult, instrumentDesignerNodes, parseDesignerDocument } from './parse.js'

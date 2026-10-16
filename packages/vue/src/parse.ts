@@ -7,7 +7,7 @@ import type {
   DesignerSourceOperation,
   DesignerSourceOperationResult,
   ParsedDesignerDocument,
-} from '@vue-designer/shared'
+} from '@component-canvas/shared'
 
 interface ParseState {
   nextId: number

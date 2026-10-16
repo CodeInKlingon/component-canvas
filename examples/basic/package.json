@@ -1,7 +1,8 @@
 {
-  "name": "@vue-designer/example",
+  "name": "@component-canvas/example",
   "version": "0.0.0",
   "private": true,
+  "description": "Example Vue project for Component Canvas.",
   "type": "module",
   "scripts": {
     "build": "vite build",
@@ -10,8 +11,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@vue-designer/vite": "workspace:*",
-    "@vue-designer/vue": "workspace:*",
+    "@component-canvas/vite": "workspace:*",
+    "@component-canvas/vue": "workspace:*",
     "vite": "^6.3.5",
     "vue": "^3.5.17"
   },

@@ -1,4 +1,4 @@
-import type { DesignerDocumentSummary } from '@vue-designer/shared'
+import type { DesignerDocumentSummary } from '@component-canvas/shared'
 
 export interface DocumentFolder {
   /** Root-relative folder path; empty for the project root. */

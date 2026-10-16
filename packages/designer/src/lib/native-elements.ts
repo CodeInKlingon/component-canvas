@@ -1,4 +1,4 @@
-import type { DesignerPropMetadata } from '@vue-designer/shared'
+import type { DesignerPropMetadata } from '@component-canvas/shared'
 
 export interface NativeElementMetadata {
   tag: string

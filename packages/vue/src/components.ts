@@ -4,7 +4,7 @@ import path from 'node:path'
 import { camelize, capitalize, hyphenate } from '@vue/shared'
 import fg from 'fast-glob'
 import { createChecker, type ComponentMetaChecker, type PropertyMetaSchema } from 'vue-component-meta'
-import type { DesignerComponentImport, DesignerComponentMetadata, DesignerPropMetadata } from '@vue-designer/shared'
+import type { DesignerComponentImport, DesignerComponentMetadata, DesignerPropMetadata } from '@component-canvas/shared'
 
 export type VueComponentTagCase = 'pascal' | 'kebab'
 

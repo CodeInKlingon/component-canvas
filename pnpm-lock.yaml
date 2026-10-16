@@ -17,10 +17,10 @@ importers:
 
   examples/basic:
     dependencies:
-      '@vue-designer/vite':
+      '@component-canvas/vite':
         specifier: workspace:*
         version: link:../../packages/vite-plugin
-      '@vue-designer/vue':
+      '@component-canvas/vue':
         specifier: workspace:*
         version: link:../../packages/vue
       vite:
@@ -42,15 +42,15 @@ importers:
 
   packages/designer:
     dependencies:
+      '@component-canvas/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@lucide/vue':
         specifier: ^1.31.0
         version: 1.31.0(vue@3.5.41(typescript@5.9.3))
       '@pierre/diffs':
         specifier: ^1.3.5
         version: 1.3.5(@shikijs/themes@4.4.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      '@vue-designer/shared':
-        specifier: workspace:*
-        version: link:../shared
       vue:
         specifier: ^3.5.17
         version: 3.5.41(typescript@5.9.3)
@@ -82,12 +82,15 @@ importers:
 
   packages/vite-plugin:
     dependencies:
+      '@component-canvas/designer':
+        specifier: workspace:*
+        version: link:../designer
+      '@component-canvas/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@cursor/sdk':
         specifier: ^1.0.27
         version: 1.0.27
-      '@vue-designer/shared':
-        specifier: workspace:*
-        version: link:../shared
       fast-glob:
         specifier: ^3.3.3
         version: 3.3.3
@@ -113,12 +116,12 @@ importers:
 
   packages/vue:
     dependencies:
+      '@component-canvas/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@vitejs/plugin-vue':
         specifier: ^5.2.4
         version: 5.2.4(vite@6.4.3(@types/node@24.13.3))(vue@3.5.41(typescript@5.9.3))
-      '@vue-designer/shared':
-        specifier: workspace:*
-        version: link:../shared
       '@vue/compiler-dom':
         specifier: ^3.5.17
         version: 3.5.41

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
 import { FileCode2, Folder, Plus, RefreshCw, Search } from '@lucide/vue'
-import type { DesignerDocumentSummary, DesignerRuntimeConfig } from '@vue-designer/shared'
+import type { DesignerDocumentSummary, DesignerRuntimeConfig } from '@component-canvas/shared'
 import NewDesignDialog from '../components/NewDesignDialog.vue'
 import ReadOnlyBadge from '../components/ReadOnlyBadge.vue'
 import UiBadge from '../components/ui/UiBadge.vue'

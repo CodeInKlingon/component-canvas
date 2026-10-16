@@ -8,7 +8,7 @@ import type {
   DesignerNode,
   DesignerPropMetadata,
   DesignerStyleRule,
-} from '@vue-designer/shared'
+} from '@component-canvas/shared'
 import type { ComponentGroup } from '../lib/component-palette'
 import type { NativeElementMetadata } from '../lib/native-elements'
 import type SourceEditor from '../components/SourceEditor.vue'

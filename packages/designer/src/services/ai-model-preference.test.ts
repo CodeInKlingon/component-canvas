@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { DesignerAiModel } from '@vue-designer/shared'
+import type { DesignerAiModel } from '@component-canvas/shared'
 import { readAiModelPreference, resolveAiModelId, resolveAiModelParams, writeAiModelPreference } from './ai-model-preference'
 
 const models: DesignerAiModel[] = [

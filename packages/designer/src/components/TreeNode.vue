@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
-import type { DesignerNode } from '@vue-designer/shared'
+import type { DesignerNode } from '@component-canvas/shared'
 import { readOnlyKey } from '../services/host'
 import NodeKindIcon from './NodeKindIcon.vue'
 import UiBadge from './ui/UiBadge.vue'

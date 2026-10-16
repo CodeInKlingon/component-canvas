@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
-import type { DesignerDocumentSummary } from '@vue-designer/shared'
+import type { DesignerDocumentSummary } from '@component-canvas/shared'
 import { hostKey } from '../services/host'
 import { documentNamePattern } from '../lib/landing'
 import UiButton from './ui/UiButton.vue'

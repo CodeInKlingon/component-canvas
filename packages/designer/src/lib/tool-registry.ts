@@ -1,6 +1,6 @@
 import type { Component } from 'vue'
 import { Component as ComponentIcon, Code2, Layers3, Paintbrush, SlidersHorizontal } from '@lucide/vue'
-import type { DesignerFrameworkClientMetadata } from '@vue-designer/shared'
+import type { DesignerFrameworkClientMetadata } from '@component-canvas/shared'
 import type { DockZone, ToolId } from './dock-layout'
 
 export interface ToolAvailabilityContext {

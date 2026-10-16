@@ -1,7 +1,8 @@
 {
-  "name": "@vue-designer/vite",
+  "name": "@component-canvas/vite",
   "version": "0.0.0",
   "private": true,
+  "description": "Framework-agnostic visual editor plugin for Vite that keeps source files authoritative.",
   "type": "module",
   "exports": {
     ".": {
@@ -16,7 +17,8 @@
   },
   "dependencies": {
     "@cursor/sdk": "^1.0.27",
-    "@vue-designer/shared": "workspace:*",
+    "@component-canvas/designer": "workspace:*",
+    "@component-canvas/shared": "workspace:*",
     "fast-glob": "^3.3.3",
     "picomatch": "^4.0.5"
   },

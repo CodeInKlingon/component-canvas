@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite'
-import designer from '@vue-designer/vite'
-import vue from '@vue-designer/vue'
+import designer from '@component-canvas/vite'
+import vue from '@component-canvas/vue'
 
 export default defineConfig({
   plugins: [

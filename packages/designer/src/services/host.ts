@@ -8,7 +8,7 @@ import type {
   DesignerRuntimeConfig,
   DesignerStaticDocument,
   DesignerStyleRule,
-} from '@vue-designer/shared'
+} from '@component-canvas/shared'
 import type { InjectionKey } from 'vue'
 
 export interface PreviewUrlRequest {

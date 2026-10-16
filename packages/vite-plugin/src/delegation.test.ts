@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createServer, type ViteDevServer } from 'vite'
-import { DesignerOperationError, type DesignerNode, type ParsedDesignerDocument } from '@vue-designer/shared'
+import { DesignerOperationError, type DesignerNode, type ParsedDesignerDocument } from '@component-canvas/shared'
 import designer, { type DesignerFramework, type DesignerDocumentContext } from './index'
 
 const source = '<document>saved</document>'

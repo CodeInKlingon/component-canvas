@@ -1,5 +1,5 @@
 import { camelize, capitalize } from 'vue'
-import type { DesignerComponentMetadata, DesignerSourceOperation } from '@vue-designer/shared'
+import type { DesignerComponentMetadata, DesignerSourceOperation } from '@component-canvas/shared'
 
 export interface ComponentGroup {
   id: string

@@ -32,8 +32,8 @@ import type {
   PreviewCandidateResponse,
   DesignerSourceCandidateResponse,
   DesignerFrameworkClientMetadata,
-} from '@vue-designer/shared'
-import { isPreviewToEditorMessage } from '@vue-designer/shared'
+} from '@component-canvas/shared'
+import { isPreviewToEditorMessage } from '@component-canvas/shared'
 import { hostKey, readOnlyKey } from '../services/host'
 import type { DesignerRoute } from '../services/router'
 import SourceEditor from '../components/SourceEditor.vue'

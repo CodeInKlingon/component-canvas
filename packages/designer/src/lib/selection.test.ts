@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { DesignerNode } from '@vue-designer/shared'
+import type { DesignerNode } from '@component-canvas/shared'
 import { findNodeAtOffset, findNodeAtPath, findNodePath, findRenderedSelection, reconcileCollapsedTree } from './selection'
 
 function node(id: string, start: number, end: number, children: DesignerNode[] = []): DesignerNode {

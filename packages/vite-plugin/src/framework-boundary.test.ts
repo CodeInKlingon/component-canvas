@@ -11,9 +11,9 @@ describe('framework package boundary', () => {
       text('../package.json'),
       text('./index.ts'),
     ])
-    expect(manifest).not.toContain('@vue-designer/vue')
+    expect(manifest).not.toContain('@component-canvas/vue')
     expect(manifest).not.toContain('vue-component-meta')
-    expect(source).not.toContain('@vue-designer/vue')
+    expect(source).not.toContain('@component-canvas/vue')
     expect(source).not.toContain('@vue/compiler')
     expect(source).not.toContain('parseDesignerDocument')
   })
@@ -31,7 +31,7 @@ describe('framework package boundary', () => {
     expect(sharedManifest).not.toContain('postcss')
     expect(sharedSource).not.toContain("from './parse")
     expect(designerSource).not.toContain('parseDesignerDocument')
-    expect(designerSource).not.toContain('@vue-designer/vue')
+    expect(designerSource).not.toContain('@component-canvas/vue')
   })
 
   it('uses Vue support as the example project\'s only Vue compiler plugin', async () => {
@@ -39,7 +39,7 @@ describe('framework package boundary', () => {
       text('../../../examples/basic/package.json'),
       text('../../../examples/basic/vite.config.ts'),
     ])
-    expect(manifest).toContain('@vue-designer/vue')
+    expect(manifest).toContain('@component-canvas/vue')
     expect(manifest).not.toContain('@vitejs/plugin-vue')
     expect(config).toContain('framework: vue()')
     expect(config).not.toContain("from '@vitejs/plugin-vue'")

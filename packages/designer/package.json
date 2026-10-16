@@ -1,7 +1,8 @@
 {
-  "name": "@vue-designer/designer",
+  "name": "@component-canvas/designer",
   "version": "0.0.0",
   "private": true,
+  "description": "The Component Canvas editor UI.",
   "type": "module",
   "scripts": {
     "build": "vue-tsc --noEmit",
@@ -11,7 +12,7 @@
   "dependencies": {
     "@lucide/vue": "^1.31.0",
     "@pierre/diffs": "^1.3.5",
-    "@vue-designer/shared": "workspace:*",
+    "@component-canvas/shared": "workspace:*",
     "vue": "^3.5.17"
   },
   "devDependencies": {

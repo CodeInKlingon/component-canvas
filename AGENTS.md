@@ -1,6 +1,6 @@
-# Vue Designer
+# Component Canvas
 
-Vue Designer is a web-based WYSIWYG editor for arranging, configuring, and styling live Vue components. It integrates into an existing Vite project and keeps normal Vue Single-File Components (SFCs) as the canonical document format.
+Component Canvas is a web-based WYSIWYG editor for arranging, configuring, and styling live Vue components. It integrates into an existing Vite project and keeps normal Vue Single-File Components (SFCs) as the canonical document format.
 
 ## Tech Stack
 

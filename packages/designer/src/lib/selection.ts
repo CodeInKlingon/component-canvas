@@ -1,4 +1,4 @@
-import type { DesignerNode } from '@vue-designer/shared'
+import type { DesignerNode } from '@component-canvas/shared'
 
 export function findNode(nodes: DesignerNode[], id: string | null): DesignerNode | null {
   if (!id) return null

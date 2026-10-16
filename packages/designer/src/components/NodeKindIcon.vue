@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { CodeXml, Component, Type } from '@lucide/vue'
-import type { DesignerNode } from '@vue-designer/shared'
+import type { DesignerNode } from '@component-canvas/shared'
 import UiIconTile from './ui/UiIconTile.vue'
 
 defineProps<{

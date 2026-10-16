@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { DesignerNode } from '@vue-designer/shared'
+import type { DesignerNode } from '@component-canvas/shared'
 import NodeKindIcon from './NodeKindIcon.vue'
 
 defineProps<{

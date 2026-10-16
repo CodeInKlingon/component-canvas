@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { DesignerComponentMetadata } from '@vue-designer/shared'
+import type { DesignerComponentMetadata } from '@component-canvas/shared'
 import type { ComponentGroup } from '../lib/component-palette'
 import type { NativeElementMetadata } from '../lib/native-elements'
 import PaletteItem from './PaletteItem.vue'

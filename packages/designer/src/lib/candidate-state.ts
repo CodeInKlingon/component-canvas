@@ -1,4 +1,4 @@
-import type { DesignerNode } from '@vue-designer/shared'
+import type { DesignerNode } from '@component-canvas/shared'
 import { findNode, findNodeAtOffset, findNodeAtPath } from './selection'
 
 export function isCurrentCandidateRequest(
