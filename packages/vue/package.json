@@ -20,7 +20,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CodeInKlingon/vue-designer.git",
+    "url": "git+https://github.com/CodeInKlingon/component-canvas.git",
     "directory": "packages/vue"
   },
   "publishConfig": {

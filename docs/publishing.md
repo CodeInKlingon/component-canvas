@@ -92,20 +92,59 @@ deliberately need to bypass those checks.
 
 ## Publishing
 
-### Recommended: publish everything in one ordered pass
+Releases run through `.github/workflows/publish.yml`, which publishes all four
+packages with **OIDC trusted publishing** and no long-lived npm token. npm is
+deprecating direct-publish tokens (removed January 2027), so OIDC is the
+supported path.
 
-pnpm publishes in topological order, so dependencies land first:
+The repository is public, so standard GitHub-hosted runner minutes are free and
+npm attaches provenance attestations to each publish automatically.
+
+### One-time trusted-publisher setup (per package)
+
+`npm trust` requires npm CLI ≥ 11.10 and an interactive 2FA code. It can be run
+**before** a package's first publish, so no bootstrap token is needed.
 
 ```sh
-pnpm -r publish --access public
+for pkg in shared designer vue vite; do
+  npm trust github "@component-canvas/$pkg" \
+    --repository CodeInKlingon/component-canvas \
+    --file publish.yml \
+    --allow-publish
+  sleep 2   # avoid registry rate limiting
+done
 ```
 
-A version can only be published once; if a package at that version already
-exists on the registry, bump all four packages to a new version before
-republishing. Use `--no-git-checks` if the repository state legitimately blocks
-the check.
+The `--file` value must match the workflow filename exactly (`publish.yml`).
 
-### Explicit order (first release)
+### Releasing
+
+1. Bump the version (`pnpm version:bump <version>`) and commit.
+2. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`, **or** run the
+   workflow manually from the Actions tab (Publish → Run workflow). Use the
+   `dry-run` input to pack and validate without publishing.
+
+The workflow installs, runs the full check suite, builds, packs each package with
+`pnpm pack` (which rewrites `workspace:*`), and publishes the tarballs with
+`npm publish` in dependency order: `shared` → `designer` → `vue` → `vite`.
+
+### Harden publishing access
+
+Once a package exists on the registry, disallow token-based publishing so only
+the trusted publisher can release:
+
+```sh
+for pkg in shared designer vue vite; do
+  npm access set mfa=publish "@component-canvas/$pkg"
+done
+```
+
+### Manual / local publishing (fallback)
+
+If `npm trust` rejects an unpublished name, or you need to publish from a
+workstation, authenticate and publish in order. With `auth-and-writes` 2FA, pass
+a one-time password per package (`pnpm publish --otp <code>`) or use an
+automation token.
 
 ```sh
 pnpm --filter @component-canvas/shared  publish --access public
@@ -114,8 +153,8 @@ pnpm --filter @component-canvas/vue     publish --access public
 pnpm --filter @component-canvas/vite    publish --access public
 ```
 
-`designer` must precede `vite`, which depends on it. `vue` only depends on
-`shared`, but publishing it after `designer` keeps the sequence stable.
+`designer` must precede `vite`, which depends on it. A version can only be
+published once; bump all four before republishing.
 
 `publishConfig.access` is set to `public` in each manifest, so the explicit
 `--access public` is belt-and-suspenders; keep it for first publishes of any new

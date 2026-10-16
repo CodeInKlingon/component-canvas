@@ -1,0 +1,81 @@
+name: Publish
+
+# Publishes the @component-canvas/* packages to npm using OIDC trusted
+# publishing. No long-lived NPM_TOKEN is used.
+#
+# Before the first run, each package must have a trusted publisher configured
+# (see docs/publishing.md). Trigger with a version tag or manually.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Pack and validate without publishing
+        type: boolean
+        default: false
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish @component-canvas/*
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for OIDC trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          # Intentionally no registry-url: trusted publishing uses OIDC, and a
+          # configured token would take precedence over it.
+
+      - name: Ensure npm supports trusted publishing
+        run: npm install --global 'npm@^11.5.1'
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify
+        run: |
+          pnpm typecheck
+          pnpm test
+
+      - name: Build packages
+        run: pnpm build:packages
+
+      - name: Pack publishable packages
+        run: |
+          mkdir -p tarballs
+          for pkg in shared designer vue vite; do
+            pnpm --filter "@component-canvas/$pkg" pack --pack-destination "$PWD/tarballs"
+          done
+
+      - name: Publish
+        run: |
+          set -euo pipefail
+          flags=(--access public)
+          if [ "${{ inputs.dry-run }}" = "true" ]; then
+            flags+=(--dry-run)
+          fi
+          # Order matters: dependents are published after their dependencies.
+          for pkg in shared designer vue vite; do
+            tgz=$(ls tarballs/component-canvas-$pkg-*.tgz)
+            echo "::group::npm publish $tgz"
+            npm publish "$tgz" "${flags[@]}"
+            echo "::endgroup::"
+          done
